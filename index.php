@@ -1738,7 +1738,33 @@ function topic_list_row(array $t, string $sort): string
     $topic_url = route_url('topic', ['id' => (int)$t['id'], 'replyid' => $reply_id > 0 ? $reply_id : null]);
     $badges = ((int)($t['is_pinned'] ?? 0) ? '<span class="topic-badge pinned">置顶</span>' : '');
     $style = (string)($t['highlight_style'] ?? '') !== '' ? ' style="' . h((string)$t['highlight_style']) . '"' : '';
-    return '<li class="post-item' . ((int)($t['is_pinned'] ?? 0) ? ' topic-pinned' : '') . '"><div class="post-avatar">' . avatar_tag((int)$t['user_id'], (string)$t['username'], (string)($t['avatar_style'] ?? ''), '', (string)($t['avatar_seed'] ?? '')) . '</div><div class="post-body"><div class="post-title-row">' . $badges . '<a class="post-title" href="' . h($topic_url) . '"' . $style . '>' . h($t['title']) . '</a>' . $pages . '</div><div class="post-meta">' . $meta . '</div></div><a class="post-tag post-forum-badge" href="' . h(route_url('forum', ['id' => (int)$forum['id']])) . '">' . h($forum['name']) . '</a></li>';
+    return '<li class="post-item' . ((int)($t['is_pinned'] ?? 0) ? ' topic-pinned' : '') . '"><a class="row-link" href="' . h($topic_url) . '" aria-hidden="true"></a><div class="post-avatar">' . avatar_tag((int)$t['user_id'], (string)$t['username'], (string)($t['avatar_style'] ?? ''), '', (string)($t['avatar_seed'] ?? '')) . '</div><div class="post-body"><div class="post-title-row">' . $badges . '<a class="post-title" href="' . h($topic_url) . '"' . $style . '>' . h($t['title']) . '</a>' . $pages . '</div><div class="post-meta">' . $meta . '</div></div><a class="post-tag post-forum-badge" href="' . h(route_url('forum', ['id' => (int)$forum['id']])) . '">' . h($forum['name']) . '</a></li>';
+}
+function topic_reply_list_row(array $t): string
+{
+    $forum = $t['forum'] ?? ['id' => (int)$t['forum_id'], 'name' => ''];
+    $ruid = (int)$t['last_reply_user_id'];
+    $rname = (string)$t['reply_username'];
+    $avatar = avatar_tag($ruid, $rname, (string)$t['reply_avatar_style'], '', (string)$t['reply_avatar_seed']);
+    $user_link = '<a href="' . h(route_url('user', ['id' => $ruid])) . '">' . svg_icon('user') . h($rname) . '</a>';
+    $forum_link = '<a href="' . h(route_url('forum', ['id' => (int)$forum['id']])) . '">' . h($forum['name']) . '</a>';
+    $topic_url = route_url('topic', ['id' => (int)$t['id'], 'replyid' => (int)$t['last_reply_id']]);
+    $title_link = '<a class="reply-topic-title" href="' . h($topic_url) . '">' . h($t['title']) . '</a>';
+    $body_html = trim((string)$t['last_reply_body']) === ''
+        ? '<div class="post-content reply-content reply-empty">（空回复）</div>'
+        : '<div class="post-content reply-content">' . markdown_html((string)$t['last_reply_body']) . '</div>';
+    $meta = '<span>' . $user_link . ' 回复了</span>' . $title_link
+          . '<span class="post-forum-meta">' . svg_icon('forum') . $forum_link . '</span>'
+          . '<span>' . svg_icon('reply') . (int)$t['reply_count'] . '</span>'
+          . ip_location_meta_html((string)$t['last_reply_ip_location'])
+          . '<span>' . human_time((int)$t['last_reply_created_at']) . '</span>';
+    $pinned = (int)($t['is_pinned'] ?? 0);
+    $badges = $pinned ? '<span class="topic-badge pinned">置顶</span>' : '';
+    return '<li class="post-item post-item-reply' . ($pinned ? ' topic-pinned' : '') . '"><a class="row-link" href="' . h($topic_url) . '" aria-hidden="true"></a>'
+        . '<div class="post-avatar">' . $avatar . '</div>'
+        . '<div class="post-body">' . $badges . $body_html . '<div class="post-meta">' . $meta . '</div></div>'
+        . '<a class="post-tag post-forum-badge" href="' . h(route_url('forum', ['id' => (int)$forum['id']])) . '">' . h($forum['name']) . '</a>'
+        . '</li>';
 }
 function topic_stats_html(int $view_count, int $reply_count): string
 {
@@ -2380,8 +2406,12 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
     $profile_tab = $_GET['tab'] ?? 'topics';
     if (!in_array($profile_tab, ['topics', 'replies', 'favorites', 'notifications'], true)) $profile_tab = 'topics';
     if ($profile_uid && !$own_profile && $profile_tab === 'notifications') $profile_tab = 'topics';
-    $sort = $profile_uid ? 'post' : (($_GET['sort'] ?? 'comment') === 'post' ? 'post' : 'comment');
-    $order = $sort === 'post' ? 't.created_at DESC,t.id DESC' : 't.last_reply_at DESC,t.id DESC';
+    if ($profile_uid) {
+        $sort = 'post';
+    } else {
+        $explicit = $_GET['sort'] ?? null;
+        $sort = $explicit === 'post' ? 'post' : ($explicit === 'comment' ? 'comment' : null);
+    }
     $q = trim((string)($_GET['q'] ?? ''));
     $pinned_ids = (!$profile_uid && !$fid && $q === '') ? pinned_topic_ids() : [];
     $where_parts = [];
@@ -2436,10 +2466,21 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
                 $where = $where ? $where . ' AND 1=0' : 'WHERE 1=0';
             }
         }
-        $total = ($q === '' && !$fid && !$profile_uid) ? (int)$stats['topics'] : (int)q("SELECT COUNT(*) FROM topics t $where", $params)->fetchColumn();
-        $rows = q("SELECT " . topic_list_select_columns('t') . " FROM topics t $where ORDER BY $order LIMIT ? OFFSET ?", array_merge($params, [$size, $off]))->fetchAll();
+        if ($sort === null) {
+            $has_replies = (int)val("SELECT EXISTS(SELECT 1 FROM topics t $where AND EXISTS(SELECT 1 FROM replies r WHERE r.topic_id=t.id))", $params);
+            $sort = $has_replies ? 'comment' : 'post';
+        }
+        $order = $sort === 'post' ? 't.created_at DESC,t.id DESC' : 't.last_reply_at DESC,t.id DESC';
+        if ($sort === 'comment') {
+            $where = $where ? $where . ' AND EXISTS(SELECT 1 FROM replies r WHERE r.topic_id=t.id)' : 'WHERE EXISTS(SELECT 1 FROM replies r WHERE r.topic_id=t.id)';
+            $total = (int)q("SELECT COUNT(*) FROM topics t $where", $params)->fetchColumn();
+        } else {
+            $total = ($q === '' && !$fid && !$profile_uid) ? (int)$stats['topics'] : (int)q("SELECT COUNT(*) FROM topics t $where", $params)->fetchColumn();
+        }
+        $extra_col = (!$profile_uid && $sort === 'comment') ? ',(SELECT id FROM replies r WHERE r.topic_id=t.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1) last_reply_id' : '';
+        $rows = q("SELECT " . topic_list_select_columns('t') . $extra_col . " FROM topics t $where ORDER BY $order LIMIT ? OFFSET ?", array_merge($params, [$size, $off]))->fetchAll();
         $rows = attach_users($rows);
-        if ($pinned_ids && $p === 1) {
+        if ($pinned_ids && $p === 1 && $sort !== 'comment') {
             $marks = implode(',', array_fill(0, count($pinned_ids), '?'));
             $pinned_rows = attach_users(q("SELECT " . topic_list_select_columns('topics') . " FROM topics WHERE id IN ($marks)", $pinned_ids)->fetchAll());
             $by_id = [];
@@ -2447,6 +2488,39 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
             $ordered = [];
             foreach ($pinned_ids as $pid) if (isset($by_id[$pid])) $ordered[] = $by_id[$pid];
             $rows = array_merge($ordered, array_values(array_filter($rows, fn($r) => !in_array((int)$r['id'], $pinned_ids, true))));
+        }
+        if (!$profile_uid && $sort === 'comment') {
+            $need = [];
+            foreach ($rows as $tt) if (!array_key_exists('last_reply_id', $tt)) $need[(int)$tt['id']] = 1;
+            if ($need) {
+                $need_ids = array_keys($need);
+                $marks = implode(',', array_fill(0, count($need_ids), '?'));
+                $lr = q("SELECT id,(SELECT id FROM replies r WHERE r.topic_id=t.id ORDER BY r.created_at DESC,r.id DESC LIMIT 1) rid FROM topics t WHERE id IN ($marks)", $need_ids)->fetchAll();
+                $rid_by_id = [];
+                foreach ($lr as $rrow) $rid_by_id[(int)$rrow['id']] = (int)$rrow['rid'];
+                foreach ($rows as &$tt) if (!array_key_exists('last_reply_id', $tt)) $tt['last_reply_id'] = $rid_by_id[(int)$tt['id']] ?? 0;
+                unset($tt);
+            }
+            $reply_ids = array_values(array_filter(array_map('intval', array_column($rows, 'last_reply_id'))));
+            $reply_map = $reply_ids ? rows_by_ids('replies', $reply_ids, 'id,body,created_at,user_id,ip_location') : [];
+            $reply_uids = array_values(array_unique(array_filter(array_map(fn($x) => (int)($x['user_id'] ?? 0), array_values($reply_map)))));
+            $reply_users = $reply_uids ? rows_by_ids('users', $reply_uids, 'id,username,avatar_style,avatar_seed') : [];
+            foreach ($rows as &$tt) {
+                $rep = $reply_map[(int)($tt['last_reply_id'] ?? 0)] ?? null;
+                if ($rep) {
+                    $ru = $reply_users[(int)$rep['user_id']] ?? null;
+                    $tt['last_reply_body'] = (string)$rep['body'];
+                    $tt['last_reply_created_at'] = (int)$rep['created_at'];
+                    $tt['last_reply_user_id'] = (int)$rep['user_id'];
+                    $tt['last_reply_ip_location'] = (string)($rep['ip_location'] ?? '');
+                    $tt['reply_username'] = (string)($ru['username'] ?? '用户删除');
+                    $tt['reply_avatar_style'] = (string)($ru['avatar_style'] ?? '');
+                    $tt['reply_avatar_seed'] = (string)($ru['avatar_seed'] ?? '');
+                } else {
+                    $tt['last_reply_id'] = 0;
+                }
+            }
+            unset($tt);
         }
     }
     $main = '';
@@ -2471,14 +2545,18 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
         if (!$rows) $main .= '<li class="empty-state">暂无通知</li>';
         else foreach ($rows as $n) $main .= notification_row_html($n);
     } elseif (!$rows) {
-        $empty = $profile_uid ? ($profile_tab === 'replies' ? '暂无回帖' : ($profile_tab === 'favorites' ? '暂无收藏' : '暂无主题')) : '暂无主题';
+        $empty = $profile_uid ? ($profile_tab === 'replies' ? '暂无回帖' : ($profile_tab === 'favorites' ? '暂无收藏' : '暂无主题')) : ($sort === 'comment' ? '暂无评论' : '暂无主题');
         $main .= '<li class="empty-state">' . ($q !== '' ? '没有找到匹配的主题' : $empty) . '</li>';
     } else {
         foreach ($rows as $t) {
             $time = (int)($t['my_reply_at'] ?? $t['favorite_at'] ?? ($sort === 'post' ? $t['created_at'] : ($t['last_reply_at'] ?: $t['created_at'])));
             $t['time'] = $time;
             $t['forum'] = forum_by_id((int)$t['forum_id']) ?: ['id' => 0, 'name' => ''];
-            $main .= topic_list_row($t, $sort);
+            if (!$profile_uid && $sort === 'comment' && (int)($t['last_reply_id'] ?? 0) > 0) {
+                $main .= topic_reply_list_row($t);
+            } else {
+                $main .= topic_list_row($t, $sort);
+            }
         }
     }
     $page_query = ($q !== '' ? 'q=' . rawurlencode($q) . '&' : '') . ($profile_uid ? 'tab=' . $profile_tab : 'sort=' . $sort);

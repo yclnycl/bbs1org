@@ -3,7 +3,6 @@ data/*.sqlite-*
 data/*.php
 cache/
 *.lock
-update.php
 .claude
 .DS_Store
 log/*

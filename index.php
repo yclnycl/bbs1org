@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 session_start();
-define('APP_VERSION', 'v1.2.1 beta');
+define('APP_VERSION', 'v1.2.2 beta');
 define('DATA_DIR', __DIR__ . '/data');
 define('DB_CONFIG_FILE', DATA_DIR . '/db.php');
 define('DEFAULT_DB_FILE', DATA_DIR . '/forum.sqlite');
@@ -381,9 +381,7 @@ function post_interval_seconds(): int
 function latest_user_content_time(int $user_id): int
 {
     if ($user_id <= 0) return 0;
-    $topic_time = (int)(val("SELECT MAX(created_at) FROM topics WHERE user_id=?", [$user_id]) ?: 0);
-    $reply_time = (int)(val("SELECT MAX(created_at) FROM replies WHERE user_id=?", [$user_id]) ?: 0);
-    return max($topic_time, $reply_time);
+    return (int)(val("SELECT last_post_at FROM users WHERE id=?", [$user_id]) ?: 0);
 }
 function check_post_interval(): void
 {
@@ -643,6 +641,8 @@ function notifications_total(int $uid): int
 }
 function notifications_unread_total(int $uid): int
 {
+    $m = me();
+    if ($m && (int)$m['id'] === $uid) return (int)($m['unread_notifications'] ?? 0);
     return (int)val("SELECT COUNT(*) FROM notifications WHERE recipient_id=? AND read_at=0", [$uid]);
 }
 function mark_notifications_read(int $uid): void
@@ -671,7 +671,7 @@ function notification_row_html(array $n): string
     $kind = notification_kind_label((string)($n['kind'] ?? ''));
     $unread = (int)($n['read_at'] ?? 0) === 0;
     $quote = notification_excerpt($body, 100);
-    $action = (string)($n['kind'] ?? '') === 'direct' && $sender_id > 0 ? '<a class="post-tag post-forum-badge" href="' . h(route_url('notify', ['id' => $sender_id, 'quote' => $quote])) . '" onclick="openNotify(this.href);return false">回复TA</a>' : '';
+    $action = (string)($n['kind'] ?? '') === 'direct' && $sender_id > 0 ? '<a class="post-tag post-forum-badge notification-reply-action" href="' . h(route_url('notify', ['id' => $sender_id, 'quote' => $quote])) . '" onclick="openNotify(this.href);return false">回复TA</a>' : '';
     return '<li class="post-item notification-item' . ($unread ? ' unread' : '') . '"><div class="post-avatar">' . avatar_tag($sender_id ?: 0, $sender_name, (string)($n['sender_avatar_style'] ?? ''), '', (string)($n['sender_avatar_seed'] ?? '')) . '</div><div class="post-body"><div class="post-title-row notification-head"><a class="post-title" href="' . h(route_url('user', ['id' => $sender_id])) . '">' . h($sender_name) . '</a><span class="post-user-group notification-kind">' . h($kind) . '</span>' . ($unread ? '<span class="notification-unread">未读</span>' : '') . '</div><div class="post-meta"><span>' . human_time((int)$n['created_at']) . '</span></div><div class="post-content notification-content">' . $content_html . '</div></div>' . $action . '</li>';
 }
 function admin_user_form_data(int $id): array
@@ -1248,6 +1248,35 @@ function paginate(int $total, int $page, int $size, string $url): string
     $h .= '</ul></div>';
     return $h;
 }
+function simple_paginate(bool $has_prev, bool $has_next, int $page, string $url): string
+{
+    if (!$has_prev && !$has_next) return '';
+    $page_url = fn(int $n): string => append_url_query($url, ['p' => $n]);
+    $h = '<div class="pagination"><ul>';
+    if ($has_prev) $h .= '<li><a href="' . h($page_url(max(1, $page - 1))) . '">上一页</a></li>';
+    $h .= '<li class="active"><a href="' . h($page_url($page)) . '">' . $page . '</a></li>';
+    if ($has_next) $h .= '<li><a href="' . h($page_url($page + 1)) . '">下一页</a></li>';
+    return $h . '</ul></div>';
+}
+function user_reply_topics_page(int $user_id, int $page, int $size): array
+{
+    $need = $page * $size + 1;
+    $scan_limit = min(max($need * 3, $size + 1), 1000);
+    $offset = 0;
+    $topics = [];
+    do {
+        $rows = q("SELECT topic_id,created_at,id FROM replies WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?", [$user_id, $scan_limit, $offset])->fetchAll();
+        foreach ($rows as $row) {
+            $tid = (int)$row['topic_id'];
+            if (isset($topics[$tid])) continue;
+            $topics[$tid] = ['id' => $tid, 'my_reply_at' => (int)$row['created_at'], 'my_reply_id' => (int)$row['id']];
+            if (count($topics) >= $need) break 2;
+        }
+        $offset += $scan_limit;
+    } while (count($rows) === $scan_limit);
+    $slice = array_slice($topics, ($page - 1) * $size, $size, true);
+    return [$slice, count($topics) > $page * $size];
+}
 function topic_page_links(int $topic_id, int $reply_count): string
 {
     $size = max(1, (int)setting('replies_per_page', '50'));
@@ -1723,8 +1752,9 @@ function page(string $title, string $body): void
     if ($flash !== '' && !headers_sent()) setcookie('__flash', '', ['expires' => time() - 3600, 'path' => '/', 'httponly' => true, 'samesite' => 'Lax']);
     echo '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' . $meta . '<title>' . h($page_title) . '</title><link rel="icon" type="image/svg+xml" href="' . h(asset_url('logo.svg')) . '"><link rel="stylesheet" href="' . h(asset_url('index.css')) . '"></head><body>';
     $mine = me();
-    $mine_link = $mine ? route_url('user', ['id' => (int)$mine['id']]) : route_url('login');
-    $mine_label = $mine ? '我的' . notification_badge_html((int)($mine['unread_notifications'] ?? 0)) : '登录';
+    $mine_unread = $mine ? (int)($mine['unread_notifications'] ?? 0) : 0;
+    $mine_link = $mine ? route_url('user', ['id' => (int)$mine['id'], 'tab' => $mine_unread > 0 ? 'notifications' : null]) : route_url('login');
+    $mine_label = $mine ? '我的' . notification_badge_html($mine_unread) : '登录';
     echo '<div class="top"><div class="bar"><a class="brand" href="' . h(route_url('home')) . '">' . h($site_name) . '</a><nav class="forum-nav">';
     foreach (array_slice(array_values(array_filter(forums_cache(), fn($f) => forum_group_allowed($f, 'allow_view_groups'))), 0, 7) as $f) echo '<a class="forum-link' . ((int)$f['id'] === $active_forum ? ' active' : '') . '" href="' . h(route_url('forum', ['id' => (int)$f['id']])) . '">' . h($f['name']) . '</a>';
     echo '</nav><form class="search-form" method="post" action="' . h(route_url('search')) . '" data-no-ajax="1">' . form_token() . '<input class="search-input" type="search" name="q" placeholder="搜索主题" value="' . h($q) . '"><button class="search-btn" type="submit" aria-label="搜索"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1.4"/><path d="M9.5 9.5L13 13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button></form><a class="nav-mine" href="' . h($mine_link) . '">' . $mine_label . '</a></div></div>';
@@ -2110,6 +2140,7 @@ function save_topic(): int
     $ts = now();
     q("INSERT INTO topics(forum_id,user_id,title,body,created_at,updated_at,last_reply_at) VALUES(?,?,?,?,?,?,?)", [$fid, (int)$author['user_id'], $title, $body, $ts, $ts, $ts]);
     $tid = (int)db()->lastInsertId();
+    q("UPDATE users SET last_post_at=? WHERE id=?", [$ts, (int)$author['user_id']]);
     q("UPDATE forums SET last_topic_id=?,last_topic_title=? WHERE id=?", [$tid, $title, $fid]);
     forums_cache(true);
     stats_cache(true);
@@ -2169,6 +2200,7 @@ function save_reply(): array
     $ts = now();
     q("INSERT INTO replies(topic_id,user_id,body,created_at,updated_at) VALUES(?,?,?,?,?)", [$tid, (int)$author['user_id'], $body, $ts, $ts]);
     $rid = (int)db()->lastInsertId();
+    q("UPDATE users SET last_post_at=? WHERE id=?", [$ts, (int)$author['user_id']]);
     q("UPDATE topics SET updated_at=?,reply_count=reply_count+1,last_reply_at=? WHERE id=?", [$ts, $ts, $tid]);
     create_reply_notifications($tid, $rid, $body, (int)$author['user_id']);
     if (($command['action'] ?? '') === 'delete' && ($command['type'] ?? '') === 'reply') del('replies', (int)$command['id']);
@@ -2357,13 +2389,20 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
     $stats = stats_cache();
     if ($profile_uid && $profile_tab === 'notifications') {
         $total = notifications_total($profile_uid);
+        $unread_total = notifications_unread_total($profile_uid);
         $rows = notifications_list($profile_uid, $size, $off);
     } elseif ($profile_uid && $profile_tab === 'replies') {
-        $where2 = $where ? $where . ' AND r.user_id=?' : 'WHERE r.user_id=?';
-        $params2 = array_merge($params, [$profile_uid]);
-        $topic_ids = array_column(q("SELECT DISTINCT topic_id id FROM replies WHERE user_id=? ORDER BY id DESC LIMIT ? OFFSET ?", [$profile_uid, $size, $off])->fetchAll(), 'id');
-        $total = (int)val("SELECT COUNT(DISTINCT topic_id) FROM replies WHERE user_id=?", [$profile_uid]);
-        $rows = $topic_ids ? q("SELECT " . topic_list_select_columns('topics') . ",(SELECT MAX(created_at) FROM replies r WHERE r.topic_id=topics.id AND r.user_id=?) my_reply_at,(SELECT id FROM replies r2 WHERE r2.topic_id=topics.id AND r2.user_id=? ORDER BY r2.created_at DESC,r2.id DESC LIMIT 1) my_reply_id FROM topics WHERE id IN (" . implode(',', array_fill(0, count($topic_ids), '?')) . ") ORDER BY my_reply_at DESC", array_merge([$profile_uid, $profile_uid], $topic_ids))->fetchAll() : [];
+        [$topic_meta, $has_next_reply_page] = user_reply_topics_page($profile_uid, $p, $size);
+        $total = $p * $size + ($has_next_reply_page ? 1 : 0);
+        $topic_ids = array_keys($topic_meta);
+        $rows = $topic_ids ? q("SELECT " . topic_list_select_columns('topics') . " FROM topics WHERE id IN (" . implode(',', array_fill(0, count($topic_ids), '?')) . ")", $topic_ids)->fetchAll() : [];
+        foreach ($rows as &$row) {
+            $meta = $topic_meta[(int)$row['id']] ?? ['my_reply_at' => 0, 'my_reply_id' => 0];
+            $row['my_reply_at'] = $meta['my_reply_at'];
+            $row['my_reply_id'] = $meta['my_reply_id'];
+        }
+        unset($row);
+        usort($rows, fn($a, $b) => ((int)$b['my_reply_at'] <=> (int)$a['my_reply_at']) ?: ((int)$b['my_reply_id'] <=> (int)$a['my_reply_id']));
         $rows = attach_users($rows);
     } elseif ($profile_uid && $profile_tab === 'favorites') {
         $fav_rows = q("SELECT topic_id,created_at favorite_at FROM favorites WHERE user_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?", [$profile_uid, $size, $off])->fetchAll();
@@ -2468,7 +2507,10 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
     if ($profile_uid && $profile_tab === 'notifications') {
         mark_notifications_read($profile_uid);
         if (!$rows) $main .= '<li class="empty-state">暂无通知</li>';
-        else foreach ($rows as $n) $main .= notification_row_html($n);
+        else foreach ($rows as $i => $n) {
+            if (($unread_total ?? 0) > 0 && $off + $i === ($unread_total ?? 0)) $main .= '<li class="notification-read-divider">下面的通知已读</li>';
+            $main .= notification_row_html($n);
+        }
     } elseif (!$rows) {
         $empty = $profile_uid ? ($profile_tab === 'replies' ? '暂无回帖' : ($profile_tab === 'favorites' ? '暂无收藏' : '暂无主题')) : ($sort === 'comment' ? '暂无评论' : '暂无主题');
         $main .= '<li class="empty-state">' . ($q !== '' ? '没有找到匹配的主题' : $empty) . '</li>';
@@ -2485,7 +2527,7 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
         }
     }
     $page_query = ($q !== '' ? 'q=' . rawurlencode($q) . '&' : '') . ($profile_uid ? 'tab=' . $profile_tab : 'sort=' . $sort);
-    $pagination = paginate($total, $p, $size, $url($page_query));
+    $pagination = ($profile_uid && $profile_tab === 'replies') ? simple_paginate($p > 1, (bool)($has_next_reply_page ?? false), $p, $url($page_query)) : paginate($total, $p, $size, $url($page_query));
     $main .= '</ul>' . ($pagination !== '' ? '<div class="pagination-bar">' . $pagination . '</div>' : '');
     $sidebar_user = $profile_uid ? $filter_user : null;
     $sidebar = sidebar_stack_html([sidebar_user_card_html($sidebar_user, false, $fid), sidebar_bio_card_html($filter_user), (!$profile_uid ? quick_forums_html() . sidebar_stats_card_html() : '')]);

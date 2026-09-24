@@ -11,18 +11,19 @@
     <link rel="stylesheet" href="{{ app_url('app/assets/index.css') }}?v={{ app_version }}">
 </head>
 <body>
+<a class="skip-link" href="#main">跳到主要内容</a>
 {% include 'nav.html.twig' with {nav: nav} only %}
-<main class="wrap">
+<main class="wrap" id="main">
     {% block content %}{% endblock %}
 </main>
 <footer class="footer"></footer>
 <div class="modal-backdrop" id="notify-modal" hidden>
-    <div class="modal-panel">
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="notify-modal-title">
         <div class="modal-head"><strong id="notify-modal-title">提示</strong><button type="button" class="modal-close" data-modal-close aria-label="关闭">×</button></div>
         <div class="modal-body" id="notify-modal-body"></div>
     </div>
 </div>
-<div class="toast" id="toast" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 <script>window.__pageFlash={{ flash_json(flash) }};</script>
 <script src="{{ app_url('app/assets/index.js') }}?v={{ app_version }}" defer></script>
 </body>

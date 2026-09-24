@@ -1,11 +1,12 @@
 {% extends 'admin/layout.html.twig' %}
+{% import 'macros/form.html.twig' as f %}
 {% block admin_body %}
     <div class="form-panel settings-form">
         <form method="post">
-            {{ form_token() }}
-            {{ render_form_fields(fields, settings) }}
+            {{ f.token() }}
+            {{ f.render_fields(fields, settings) }}
             <div class="row settings-actions"><button type="submit">保存</button></div>
         </form>
-        <div class="settings-tool-grid">{{ tools|raw }}</div>
+        <div class="settings-tool-grid"><div class="settings-tool-card"><div><strong>清理OPcache</strong><span>刷新已编译脚本缓存，适合代码更新后手动触发。</span></div>{{ f.action_form(admin_url({tab: 'settings'}), '清理', {clear_opcache: '1'}, 'settings-tool-action') }}</div>{% if debug_mode %}<div class="settings-tool-card"><div><strong>Debug日志</strong><span>{{ debug_log_file }}</span></div><div class="settings-tool-actions">{{ f.action_form(admin_url({tab: 'settings'}), '清空', {debug_log_action: 'clear'}, 'settings-tool-action', '确定清空Debug日志？') }}<a class="settings-tool-action" href="{{ admin_url({tab: 'settings', debug_log: 'view'})|e }}" target="_blank">查看</a></div></div>{% endif %}</div>
     </div>
 {% endblock %}

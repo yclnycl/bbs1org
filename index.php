@@ -1,11 +1,22 @@
 <?php
 declare(strict_types=1);
 use app\optional\Admin;
+use app\optional\Bootstrap;
+use app\optional\Db\Database;
+use app\optional\Db\SqlitePdo;
+use app\optional\DebugLog;
+use app\optional\Model\Forum;
+use app\optional\Model\Group;
+use app\optional\Model\Notification;
+use app\optional\Model\Reply;
+use app\optional\Model\Setting;
+use app\optional\Model\Topic;
+use app\optional\Model\TopicDeletion;
+use app\optional\Model\User;
 use app\optional\Search;
-use app\optional\Setup;
 if (!is_file(__DIR__ . '/vendor/autoload.php')) {
     header('Content-Type: text/plain; charset=utf-8');
-    exit("缺少 Twig 依赖：请先在项目根目录执行 composer install 后再运行本程序。\n");
+    exit("缺少依赖：请先在项目根目录执行 composer install 后再运行本程序。\n");
 }
 require __DIR__ . '/vendor/autoload.php';
 ini_set('display_errors', '0');
@@ -46,22 +57,13 @@ function app_db_connect(array $config): PDO
     }
     $dir = dirname((string)$config['path']);
     if (!is_dir($dir)) mkdir($dir, 0755, true);
-    $db = new PDO('sqlite:' . $config['path'], null, null, [
+    $db = new SqlitePdo('sqlite:' . $config['path'], null, null, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES => false,
     ]);
     foreach (['PRAGMA journal_mode=WAL', 'PRAGMA synchronous=NORMAL', 'PRAGMA temp_store=MEMORY', 'PRAGMA busy_timeout=5000', 'PRAGMA foreign_keys=ON'] as $sql) $db->exec($sql);
     return $db;
-}
-function app_db_identifier(string $name): string
-{
-    if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $name)) throw new InvalidArgumentException('无效的数据库标识符。');
-    return '"' . $name . '"';
-}
-function sql_marks(int $count): string
-{
-    return implode(',', array_fill(0, $count, '?'));
 }
 function app_db_types(): array
 {
@@ -85,18 +87,6 @@ function app_db_index_exists(PDO $db, string $index, string $table = ''): bool
     $stmt->execute($table !== '' ? [$index, $table] : [$index]);
     return (bool)$stmt->fetchColumn();
 }
-function app_db_upsert_sql(string $table, array $columns, array $keys): string
-{
-    $marks = sql_marks(count($columns));
-    $base = 'INSERT INTO ' . app_db_identifier($table) . '(' . implode(',', $columns) . ') VALUES(' . $marks . ')';
-    $updates = array_values(array_diff($columns, $keys));
-    if (!$updates) return $base . ' ON CONFLICT(' . implode(',', $keys) . ') DO NOTHING';
-    return $base . ' ON CONFLICT(' . implode(',', $keys) . ') DO UPDATE SET ' . implode(',', array_map(fn($c) => $c . '=excluded.' . $c, $updates));
-}
-function app_db_last_insert_id(string $table): int
-{
-    return (int)db()->lastInsertId();
-}
 function db_config(): array
 {
     static $config;
@@ -111,61 +101,6 @@ function db(): PDO
 function h(string|int|float|bool|null $s): string
 {
     return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
-}
-function sql_query_count(bool $increment = false): int
-{
-    static $count = 0;
-    if ($increment) $count++;
-    return $count;
-}
-function db_row_cache_clear(): void
-{
-    $GLOBALS['__db_row_cache'] = [];
-}
-function row(string $table, string $key, mixed $value): ?array
-{
-    $cache =& $GLOBALS['__db_row_cache'];
-    if (!is_array($cache)) $cache = [];
-    $cache_key = $table . "\0" . $key . "\0" . serialize($value);
-    if (!array_key_exists($cache_key, $cache)) {
-        $table = app_db_identifier($table);
-        $key = app_db_identifier($key);
-        $cache[$cache_key] = one("SELECT * FROM $table WHERE $key=?", [$value]) ?: false;
-    }
-    return $cache[$cache_key] ?: null;
-}
-function q(string $sql, array $p = []): PDOStatement
-{
-    if (strncasecmp(ltrim($sql), 'SELECT', 6) !== 0) db_row_cache_clear();
-    sql_query_count(true);
-    $s = db()->prepare($sql);
-    $s->execute($p);
-    $GLOBALS['__sql_queries'][] = [$sql, $p];
-    return $s;
-}
-function one(string $sql, array $p = []): ?array
-{
-    $r = q($sql, $p)->fetch();
-    return $r ?: null;
-}
-function val(string $sql, array $p = []): mixed
-{
-    return q($sql, $p)->fetchColumn();
-}
-function tx(callable $fn): mixed
-{
-    $db = db();
-    if ($db->inTransaction()) return $fn();
-    $db->exec('BEGIN IMMEDIATE');
-    try {
-        $result = $fn();
-        $db->exec('COMMIT');
-        return $result;
-    } catch (Throwable $e) {
-        try { $db->exec('ROLLBACK'); } catch (Throwable) {}
-        db_row_cache_clear();
-        throw $e;
-    }
 }
 function auth_cookie_secure(): bool
 {
@@ -212,40 +147,38 @@ function csrf_token(): string
     }
     return $token;
 }
-function rows_by_ids(string $table, array $ids, string $cols = '*'): array
+function topic_rows_by_ids(array $ids): array
 {
     $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
     if (!$ids) return [];
-    if (in_array($table, ['app_users', 'app_topics', 'app_replies'], true) && count($ids) === 1) {
-        $row = row($table, 'id', $ids[0]);
-        if (!$row) return [];
-        return [$ids[0] => $row];
-    }
-    $marks = sql_marks(count($ids));
-    $rows = q("SELECT $cols FROM $table WHERE id IN ($marks)", $ids)->fetchAll();
-    $map = [];
-    foreach ($rows as $row) $map[(int)$row['id']] = $row;
-    return $map;
+    return Topic::whereIn('id', $ids)->get(topic_list_columns())->keyBy('id')
+        ->map(static fn(Topic $topic): array => $topic->toArray())->all();
 }
 function user_summary_defaults(string $username = ''): array
 {
     return ['username' => $username, 'group_id' => 0, 'is_muted' => 0];
 }
+/** @return array<int, User> 以 id 为键的用户摘要，用于一次性补齐列表里的用户名 */
+function user_summaries(array $ids): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+    if (!$ids) return [];
+    return User::whereIn('id', $ids)->get(['id', 'username', 'group_id', 'is_muted'])->keyBy('id')->all();
+}
 function attach_users(array $rows, string $key = 'user_id', string $fallback = '用户删除'): array
 {
-    $users = rows_by_ids('app_users', array_column($rows, $key), 'id,username,group_id,is_muted');
-    foreach ($rows as &$row) $row += ($users[(int)($row[$key] ?? 0)] ?? user_summary_defaults($fallback));
+    $users = user_summaries(array_column($rows, $key));
+    foreach ($rows as &$row) $row += ($users[(int)($row[$key] ?? 0)] ?? null)?->only(['username', 'group_id', 'is_muted']) ?? user_summary_defaults($fallback);
     unset($row);
     return $rows;
 }
 function attach_topic_list_users(array $rows): array
 {
-    $user_ids = array_merge(array_column($rows, 'user_id'), array_column($rows, 'last_reply_user_id'));
-    $users = rows_by_ids('app_users', $user_ids, 'id,username,group_id,is_muted');
+    $users = user_summaries(array_merge(array_column($rows, 'user_id'), array_column($rows, 'last_reply_user_id')));
     foreach ($rows as &$row) {
-        $row += ($users[(int)($row['user_id'] ?? 0)] ?? user_summary_defaults());
+        $row += ($users[(int)($row['user_id'] ?? 0)] ?? null)?->only(['username', 'group_id', 'is_muted']) ?? user_summary_defaults();
         $last_reply_uid = (int)($row['last_reply_user_id'] ?? 0);
-        $row['last_reply_username'] = $last_reply_uid > 0 ? (string)($users[$last_reply_uid]['username'] ?? '') : '';
+        $row['last_reply_username'] = $last_reply_uid > 0 ? (string)(($users[$last_reply_uid] ?? null)?->username ?? '') : '';
     }
     unset($row);
     return $rows;
@@ -277,7 +210,7 @@ function default_settings(): array
 }
 function settings_cache(): array
 {
-    return $GLOBALS['__settings_cache'] ??= array_merge(default_settings(), array_column(q("SELECT name,value FROM app_settings")->fetchAll(), 'value', 'name'));
+    return $GLOBALS['__settings_cache'] ??= array_merge(default_settings(), Setting::query()->pluck('value', 'name')->all());
 }
 function setting(string $key, string $default = ''): string
 {
@@ -299,20 +232,12 @@ function require_length(string $value, int $minimum, string $label): void
 }
 function save_settings_values(array $values): void
 {
-    $stmt = db()->prepare(app_db_upsert_sql('app_settings', ['name', 'value'], ['name']));
-    foreach ($values as $name => $value) $stmt->execute([$name, $value]);
-    db_row_cache_clear();
+    $rows = [];
+    foreach ($values as $name => $value) $rows[] = ['name' => (string)$name, 'value' => (string)$value];
+    Setting::upsert($rows, ['name'], ['value']);
     if (is_array($GLOBALS['__settings_cache'] ?? null)) {
         foreach ($values as $name => $value) $GLOBALS['__settings_cache'][(string)$name] = (string)$value;
     }
-}
-function settings_rows_cache(string $key, string $sql, bool $refresh): array
-{
-    $rows = $refresh ? null : json_decode(setting($key), true);
-    if (is_array($rows)) return $rows;
-    $rows = q($sql)->fetchAll();
-    save_settings_values([$key => json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)]);
-    return $rows;
 }
 function exception_detail(Throwable $e): string
 {
@@ -334,7 +259,7 @@ function debug_mode_enabled(): bool
 function debug_log_write(string $message, ?Throwable $e = null): void
 {
     if (!debug_mode_enabled()) return;
-    Setup::debug_log_write($message, $e);
+    DebugLog::write($message, $e);
 }
 set_error_handler(function (int $severity, string $message, string $file, int $line): bool {
     if (error_reporting() === 0) return false;
@@ -398,7 +323,7 @@ function check_post_interval(): void
 {
     $seconds = post_interval_seconds();
     if ($seconds <= 0 || !uid()) return;
-    $wait = $seconds - (time() - (int)(row('app_users', 'id', uid())['last_post_at'] ?? 0));
+    $wait = $seconds - (time() - (int)(User::whereKey(uid())->value('last_post_at') ?? 0));
     if ($wait > 0) err('操作太频繁，请 ' . $wait . ' 秒后再试');
 }
 function clean_site_base_url(string $url): string
@@ -415,7 +340,7 @@ function clean_site_base_url(string $url): string
 function forums_cache(bool $refresh = false): array
 {
     if ($refresh) unset($GLOBALS['__forums_cache'], $GLOBALS['__forum_by_id_map']);
-    return $GLOBALS['__forums_cache'] ??= settings_rows_cache('cache_forums', "SELECT id,name,description,sort,allow_view_groups,allow_post_groups,allow_reply_groups FROM app_forums ORDER BY sort,id", $refresh);
+    return $GLOBALS['__forums_cache'] ??= Forum::query()->orderBy('sort')->orderBy('id')->get()->toArray();
 }
 function forum_by_id(int $id): ?array
 {
@@ -445,7 +370,7 @@ function forum_group_allowed(?array $forum, string $field): bool
 function groups_cache(bool $refresh = false): array
 {
     if ($refresh) unset($GLOBALS['__groups_cache'], $GLOBALS['__group_by_id_map']);
-    return $GLOBALS['__groups_cache'] ??= settings_rows_cache('cache_groups', "SELECT id,name,allow_manage,allow_admin FROM app_groups ORDER BY id", $refresh);
+    return $GLOBALS['__groups_cache'] ??= Group::query()->orderBy('id')->get()->toArray();
 }
 function group_by_id(int $id): ?array
 {
@@ -454,10 +379,6 @@ function group_by_id(int $id): ?array
         foreach (groups_cache() as $group) $GLOBALS['__group_by_id_map'][(int)$group['id']] = $group;
     }
     return $GLOBALS['__group_by_id_map'][$id] ?? null;
-}
-function notification_badge_html(int $count): string
-{
-    return $count > 0 ? '<span class="notify-badge">' . (int)$count . '</span>' : '';
 }
 function content_excerpt(string $body, ?int $max = null): string
 {
@@ -499,29 +420,33 @@ function create_notification(int $recipient_id, int $sender_id, string $kind, st
     $content = trim($content);
     if ($recipient_id <= 0 || $content === '') return false;
     if ($recipient_id === $sender_id) return false;
-    $topic_id = $topic_id > 0 ? $topic_id : null;
-    $reply_id = $reply_id > 0 ? $reply_id : null;
-    $created_at = now();
-    q("INSERT INTO app_notifications(recipient_id,sender_id,kind,content,topic_id,reply_id,created_at,read_at) VALUES(?,?,?,?,?,?,?,0)", [$recipient_id, $sender_id, $kind, $content, $topic_id, $reply_id, $created_at]);
-    $notification_id = app_db_last_insert_id('app_notifications');
-    q("UPDATE app_users SET unread_notifications=COALESCE(unread_notifications,0)+1 WHERE id=?", [$recipient_id]);
+    Notification::create([
+        'recipient_id' => $recipient_id,
+        'sender_id' => $sender_id,
+        'kind' => $kind,
+        'content' => $content,
+        'topic_id' => $topic_id > 0 ? $topic_id : null,
+        'reply_id' => $reply_id > 0 ? $reply_id : null,
+        'created_at' => now(),
+        'read_at' => 0,
+    ]);
+    // 未读角标直接在 SQL 里自增，避免读改写之间丢计数
+    User::whereKey($recipient_id)->increment('unread_notifications');
     return true;
 }
 function create_mention_notifications(int $topic_id, int $reply_id, string $body, int $sender_id): void
 {
-    $topic = row('app_topics', 'id', $topic_id);
+    $topic = Topic::find($topic_id);
     if (!$topic) return;
     $usernames = notification_targets($body);
     $targets = [];
     if ($usernames) {
-        $marks = sql_marks(count($usernames));
-        $users = q("SELECT id FROM app_users WHERE username IN ($marks)", $usernames)->fetchAll();
-        foreach ($users as $user) $targets[(int)$user['id']] = true;
+        foreach (User::whereIn('username', $usernames)->pluck('id') as $id) $targets[(int)$id] = true;
     }
     unset($targets[$sender_id]);
     $excerpt = notification_excerpt($body);
     foreach (array_keys($targets) as $uid) {
-        create_notification((int)$uid, $sender_id, 'mention', '在主题《' . (string)$topic['title'] . '》中提到你：' . $excerpt, $topic_id, $reply_id);
+        create_notification((int)$uid, $sender_id, 'mention', '在主题《' . (string)$topic->title . '》中提到你：' . $excerpt, $topic_id, $reply_id);
     }
 }
 function create_topic_notifications(int $topic_id, string $body, int $sender_id): void
@@ -534,30 +459,26 @@ function create_reply_notifications(int $topic_id, int $reply_id, string $body, 
 }
 function notifications_list(int $uid, int $limit, int $offset = 0): array
 {
-    $rows = q("SELECT * FROM app_notifications WHERE recipient_id=? ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?", [$uid, $limit, $offset])->fetchAll();
-    $users = rows_by_ids('app_users', array_column($rows, 'sender_id'), 'id,username');
-    foreach ($rows as &$row) {
-        $u = $users[(int)($row['sender_id'] ?? 0)] ?? null;
-        $row['sender_username'] = (string)($u['username'] ?? '');
-    }
-    unset($row);
-    return $rows;
+    return Notification::where('recipient_id', $uid)->orderByDesc('created_at')->orderByDesc('id')
+        ->limit($limit)->offset($offset)->with('sender:id,username')->get()
+        ->map(static fn(Notification $n): array => $n->getAttributes() + ['sender_username' => (string)($n->sender?->username ?? '')])
+        ->all();
 }
 function notifications_total(int $uid): int
 {
-    return (int)val('SELECT COUNT(*) FROM app_notifications WHERE recipient_id=?', [$uid]);
+    return Notification::where('recipient_id', $uid)->count();
 }
 function notifications_unread_total(int $uid): int
 {
     $m = me();
     if ($m && (int)$m['id'] === $uid) return (int)($m['unread_notifications'] ?? 0);
-    return (int)val('SELECT COUNT(*) FROM app_notifications WHERE recipient_id=? AND read_at=0', [$uid]);
+    return Notification::where('recipient_id', $uid)->where('read_at', 0)->count();
 }
 function mark_notifications_read(int $uid, int $unread): void
 {
     if ($unread <= 0) return;
-    q("UPDATE app_notifications SET read_at=? WHERE recipient_id=? AND read_at=0", [now(), $uid]);
-    q("UPDATE app_users SET unread_notifications=0 WHERE id=?", [$uid]);
+    Notification::where('recipient_id', $uid)->where('read_at', 0)->update(['read_at' => now()]);
+    User::whereKey($uid)->update(['unread_notifications' => 0]);
     if (is_array($GLOBALS['__me_cache'] ?? null) && (int)$GLOBALS['__me_cache']['id'] === $uid) $GLOBALS['__me_cache']['unread_notifications'] = 0;
 }
 function notification_link(array $n): string
@@ -568,42 +489,6 @@ function notification_link(array $n): string
     if ((int)($n['sender_id'] ?? 0) > 0) return route_url('user', ['id' => (int)$n['sender_id']]);
     return route_url('home');
 }
-function notification_row_html(array $n): string
-{
-    $sender_id = (int)($n['sender_id'] ?? 0);
-    $sender_name = trim((string)($n['sender_username'] ?? '')) ?: '系统';
-    $body = (string)($n['content'] ?? '');
-    $content_html = markdown_html($body);
-    if ((int)($n['topic_id'] ?? 0) > 0 || (int)($n['reply_id'] ?? 0) > 0) {
-        $url = notification_link($n);
-        if ($url !== '') {
-            $title_marker = "\x1ENOTIFICATION_TOPIC_TITLE\x1E";
-            $topic_title = '';
-            $source = preg_replace_callback('/《((?:[^《》]|(?R))*)》/u', static function (array $match) use (&$topic_title, $title_marker): string {
-                $topic_title = $match[1];
-                return '《' . $title_marker . '》';
-            }, $body, 1, $count);
-            if (is_string($source) && $count > 0) {
-                // Render the title as one link so mentions in it cannot create nested anchors.
-                $content_html = str_replace($title_marker, '<a href="' . h($url) . '">' . h($topic_title) . '</a>', markdown_html($source));
-            } else {
-                $view_link = '<a href="' . h($url) . '">查看主题</a>';
-                $content_html = preg_replace('/<\/p>\s*$/u', ' ' . $view_link . '</p>', $content_html, 1, $paragraph_count) ?? $content_html;
-                if ($paragraph_count < 1) $content_html .= ' ' . $view_link;
-            }
-        }
-    }
-    $kind = match ((string)($n['kind'] ?? '')) { 'mention' => '提及', default => '通知' };
-    $unread = (int)($n['read_at'] ?? 0) === 0;
-    $sender_title = $sender_id > 0 ? '<a class="post-title" href="' . h(route_url('user', ['id' => $sender_id])) . '">' . h($sender_name) . '</a>' : '<span class="post-title">' . h($sender_name) . '</span>';
-    return '<li class="post-item notification-item' . ($unread ? ' unread' : '') . '"><div class="post-avatar">' . avatar_link_tag($sender_id ?: 0, $sender_name) . '</div><div class="post-body"><div class="post-title-row notification-head">' . $sender_title . '<span class="post-user-group notification-kind">' . h($kind) . '</span>' . ($unread ? '<span class="notification-unread">未读</span>' : '') . '</div><div class="post-meta"><span>' . human_time((int)$n['created_at']) . '</span></div><div class="post-content notification-content">' . $content_html . '</div></div></li>';
-}
-function user_state_tag_html(array $u): string
-{
-    $tags = [];
-    if ((int)($u['is_muted'] ?? 0) === 1) $tags[] = '<span class="user-state-tag danger">禁言</span>';
-    return $tags ? '<span class="user-state-tags">' . implode('', $tags) . '</span>' : '';
-}
 function mark_viewed(int $tid): bool
 {
     $seen = array_values(array_unique(array_filter(array_map('intval', explode('.', (string)($_COOKIE['__viewed_topics'] ?? ''))))));
@@ -613,12 +498,6 @@ function mark_viewed(int $tid): bool
     app_cookie('__viewed_topics', $value, time() + COOKIE_TTL, false);
     $_COOKIE['__viewed_topics'] = $value;
     return true;
-}
-function sidebar_notice_card_html(string $title, array $items): string
-{
-    $html = '<div class="card sidebar-card quick-card"><div class="quick-wrap"><div class="quick-title">' . h($title) . '</div><ul class="quick-links notice-links">';
-    foreach ($items as $item) $html .= '<li>' . h($item) . '</li>';
-    return $html . '</ul></div></div>';
 }
 function mobile_menu_content_html(?array $mine = null, ?array $forums = null): string
 {
@@ -644,63 +523,6 @@ function mobile_menu_content_html(?array $mine = null, ?array $forums = null): s
         ['title' => '版块列表', 'links' => $forum_links],
         ['title' => '我的菜单', 'links' => $my_links],
     ]]);
-}
-function shell_html(string $main, string $sidebar, string $class = ''): string
-{
-    $layout_class = 'forum-layout' . ($sidebar !== '' ? ' forum-layout-has-sidebar' : '');
-    return '<div class="home-shell' . ($class !== '' ? ' ' . h($class) : '') . '"><div class="' . $layout_class . '"><div class="forum-main"><div class="main-panel" >' . $main . '</div></div>' . $sidebar . '</div></div>';
-}
-function tab_bar_html(array $items, string $active, string $class = ''): string
-{
-    $html = '<div class="tab-bar' . ($class !== '' ? ' ' . $class : '') . '">';
-    foreach ($items as $key => $item) {
-        $label = is_array($item) ? (string)($item['label'] ?? '') : (string)$item;
-        $href = is_array($item) ? (string)($item['href'] ?? '#') : '#';
-        $extra = is_array($item) ? (string)($item['class'] ?? '') : '';
-        $html .= '<a class="tab' . ($active === $key ? ' active' : '') . ($extra !== '' ? ' ' . $extra : '') . '" href="' . h($href) . '">' . $label . '</a>';
-    }
-    return $html . '</div>';
-}
-function auth_tabs_html(string $active): string
-{
-    return tab_bar_html([
-        'login' => ['label' => '登录', 'href' => route_url('login')],
-        'register' => ['label' => '注册', 'href' => route_url('register')],
-    ], $active, 'auth-tabs');
-}
-function sidebar_stack_html(array $parts): string
-{
-    $html = '<aside class="sidebar">';
-    foreach ($parts as $part) if ($part !== '') $html .= $part;
-    return $html . '</aside>';
-}
-function sidebar_user_card_html(?array $m = null, bool $reply_button = false, int $fid = 0): string
-{
-    $m = $m ?: me();
-    if (!$m) return '<div class="card sidebar-card user-card"><div class="user-wrap"><div class="user-header"><div class="user-header-info"><div class="user-avatar-big visitor-avatar">P</div><div><div class="user-name">访客</div><div class="user-rank">请登录后发帖</div></div></div></div><div class="side-auth' . (setting('allow_register', '1') === '1' ? '' : ' single') . '"><a href="' . h(route_url('login')) . '">登录</a>' . (setting('allow_register', '1') === '1' ? '<a href="' . h(route_url('register')) . '">注册</a>' : '') . '</div></div></div>';
-    $is_self = uid() && (int)$m['id'] === uid();
-    $prefix = $is_self ? '我的' : 'TA的';
-    $unread = $is_self ? (int)($m['unread_notifications'] ?? 0) : 0;
-    $links = '<a href="' . h(route_url('user', ['id' => (int)$m['id'], 'tab' => 'topics'])) . '">' . svg_icon('topic') . $prefix . '主题</a><a href="' . h(route_url('user', ['id' => (int)$m['id'], 'tab' => 'replies'])) . '">' . svg_icon('reply') . $prefix . '回帖</a>';
-    if ($is_self) $links .= '<a href="' . h(route_url('user', ['id' => (int)$m['id'], 'tab' => 'notifications'])) . '">' . svg_icon('notify') . $prefix . '通知' . notification_badge_html($unread) . '</a><a href="' . h(route_url('profile')) . '">' . svg_icon('settings') . '个人设置</a>' . (can_access_admin() ? '<a href="' . h(route_url('admin')) . '">' . svg_icon('admin') . '后台面板</a>' : '');
-    $user_url = route_url('user', ['id' => (int)$m['id']]);
-    $rank = h($m['group_name'] ?? '用户');
-    $state_tags = user_state_tag_html($m);
-    $html = '<div class="card sidebar-card user-card"><div class="user-wrap"><div class="user-header"><div class="user-header-info"><a class="user-avatar-big" href="' . $user_url . '">' . avatar_tag((int)$m['id'], (string)$m['username']) . '</a><div><a class="user-name" href="' . $user_url . '">' . h($m['username']) . '</a><div class="user-rank">' . $rank . $state_tags . '</div></div></div></div><div class="user-links" >' . $links . '</div></div>';
-    if (can_speak() && ($is_self || $reply_button)) $html .= '<a class="btn-post" href="' . h($reply_button ? '#reply' : route_url('topic_edit', ['fid' => $fid ?: null])) . '">' . ($reply_button ? '回帖' : '+ 发帖') . '</a>';
-    return $html . '</div>';
-}
-function topic_user_group_html(array $row): string
-{
-    $gid = (int)($row['group_id'] ?? 0);
-    $default_gid = (int)setting('default_group_id', '2');
-    if ($gid <= 0 || $gid === $default_gid) return '';
-    $g = group_by_id($gid);
-    return $g ? '<span class="post-user-group"><span class="post-user-group-icon" aria-hidden="true">' . svg_icon('user') . '</span>' . h($g['name']) . '</span>' : '';
-}
-function form_shell(string $body, ?array $m = null): string
-{
-    return shell_html($body, sidebar_stack_html([sidebar_user_card_html($m)]));
 }
 function now(): int
 {
@@ -731,13 +553,13 @@ function me(): ?array
         if ($parts) auth_cookie_clear();
         return $GLOBALS['__me_cache'] = null;
     }
-    $u = row('app_users', 'id', $parts['id']);
-    $expected = $u ? hash_hmac('sha256', $parts['id'] . '|' . $parts['expire'], (string)$u['password']) : '';
+    $u = User::find($parts['id']);
+    $expected = $u ? hash_hmac('sha256', $parts['id'] . '|' . $parts['expire'], (string)$u->password) : '';
     if (!$u || !hash_equals($expected, $parts['signature'])) {
         clear_auth_cookie();
         return null;
     }
-    $g = group_by_id((int)$u['group_id']);
+    $g = group_by_id((int)$u->group_id);
     if (!$g) {
         $fallback_group_id = (int)setting('default_group_id', '2');
         $g = group_by_id($fallback_group_id);
@@ -745,11 +567,11 @@ function me(): ?array
             clear_auth_cookie();
             return null;
         }
-        q('UPDATE app_users SET group_id=? WHERE id=? AND group_id=?', [$fallback_group_id, (int)$u['id'], (int)$u['group_id']]);
-        $u['group_id'] = $fallback_group_id;
+        User::whereKey($u->id)->where('group_id', $u->group_id)->update(['group_id' => $fallback_group_id]);
+        $u->group_id = $fallback_group_id;
     }
-    $GLOBALS['__request_uid'] = (int)$u['id'];
-    return $GLOBALS['__me_cache'] = $u + ['group_name' => $g['name'], 'group_id' => (int)($u['group_id'] ?? 0), 'is_muted' => (int)($u['is_muted'] ?? 0), 'allow_manage' => (int)($g['allow_manage'] ?? 0), 'allow_admin' => (int)($g['allow_admin'] ?? 0)];
+    $GLOBALS['__request_uid'] = (int)$u->id;
+    return $GLOBALS['__me_cache'] = $u->toArray() + ['group_name' => $g['name'], 'group_id' => (int)($u->group_id ?? 0), 'is_muted' => (int)($u->is_muted ?? 0), 'allow_manage' => (int)($g['allow_manage'] ?? 0), 'allow_admin' => (int)($g['allow_admin'] ?? 0)];
 }
 function can_manage(): bool
 {
@@ -784,9 +606,9 @@ function consume_auth_return_url(): string
 }
 function start_cookie_login(int $user_id): void
 {
-    $user = row('app_users', 'id', $user_id) ?: err('用户不存在');
+    $user = User::find($user_id) ?: err('用户不存在');
     csrf_cookie_clear();
-    auth_cookie_set($user_id, (string)$user['password']);
+    auth_cookie_set($user_id, (string)$user->password);
     $GLOBALS['__request_uid'] = $user_id;
     unset($GLOBALS['__me_cache']);
 }
@@ -926,61 +748,6 @@ function limit_pagination_request_pages(): void
         $_GET[$key] = (string)min($max, max(1, (int)$value));
     }
 }
-function paginate(int $total, int $page, int $size, string $url, bool $limited = true): string
-{
-    $pages = max(1, (int)ceil($total / $size));
-    if ($limited) $pages = min($pages, max_pagination_pages());
-    if ($pages <= 1) return '';
-    $page = max(1, min($page, $pages));
-    $page_url = fn(int $n): string => append_url_query($url, ['p' => $n]);
-    $h = '<div class="pagination"><ul>';
-    if ($page > 1) $h .= '<li><a href="' . h($page_url($page - 1)) . '">上一页</a></li>';
-    $start = max(1, $page - 2);
-    $end = min($pages, $page + 2);
-    if ($start > 1) {
-        $h .= '<li><a href="' . h($page_url(1)) . '">1</a></li>';
-        if ($start > 2) $h .= '<li><span class="ellipsis">...</span></li>';
-    }
-    for ($i = $start; $i <= $end; $i++) {
-        $h .= '<li' . ($i === $page ? ' class="active"' : '') . '><a href="' . h($page_url($i)) . '">' . $i . '</a></li>';
-    }
-    if ($end < $pages) {
-        if ($end < $pages - 1) $h .= '<li><span class="ellipsis">...</span></li>';
-        $h .= '<li><a href="' . h($page_url($pages)) . '">' . $pages . '</a></li>';
-    }
-    if ($page < $pages) $h .= '<li><a href="' . h($page_url($page + 1)) . '">下一页</a></li>';
-    $h .= '</ul></div>';
-    return $h;
-}
-function simple_paginate(bool $has_prev, bool $has_next, int $page, string $url, bool $limited = true): string
-{
-    if ($limited && $page >= max_pagination_pages()) $has_next = false;
-    if (!$has_prev && !$has_next) return '';
-    $page_url = fn(int $n): string => append_url_query($url, ['p' => $n]);
-    $h = '<div class="pagination"><ul>';
-    if ($has_prev) $h .= '<li><a href="' . h($page_url(max(1, $page - 1))) . '">上一页</a></li>';
-    $h .= '<li class="active"><a href="' . h($page_url($page)) . '">' . $page . '</a></li>';
-    if ($has_next) $h .= '<li><a href="' . h($page_url($page + 1)) . '">下一页</a></li>';
-    return $h . '</ul></div>';
-}
-function topic_page_links(int $topic_id, int $reply_count): string
-{
-    $size = max(1, (int)setting('replies_per_page', '50'));
-    $pages = (int)ceil($reply_count / $size);
-    if ($pages <= 1) return '';
-    $nums = [];
-    foreach ([2, 3, $pages - 2, $pages - 1, $pages] as $n) if ($n >= 2 && $n <= $pages) $nums[$n] = true;
-    $nums = array_keys($nums);
-    sort($nums);
-    $h = '<span class="topic-pages">' . svg_icon('pages');
-    $prev = 1;
-    foreach ($nums as $i) {
-        if ($i - $prev > 1) $h .= '<span class="topic-pages-sep">…</span>';
-        $h .= '<a href="' . h(route_url('topic', ['id' => $topic_id, 'p' => $i])) . '">' . $i . '</a>';
-        $prev = $i;
-    }
-    return $h . '</span>';
-}
 function post(string $k, int $max = 0): string
 {
     $v = trim((string)($_POST[$k] ?? ''));
@@ -990,54 +757,9 @@ function id(string $k = 'id'): int
 {
     return max(0, (int)($_GET[$k] ?? $_POST[$k] ?? 0));
 }
-function form_token(): string
-{
-    return '<input type="hidden" name="_csrf" value="' . h(csrf_token()) . '">';
-}
-function hidden_inputs(array $fields): string
-{
-    $html = '';
-    foreach ($fields as $name => $value) {
-        if ($value === null) continue;
-        $html .= '<input type="hidden" name="' . h((string)$name) . '" value="' . h((string)$value) . '">';
-    }
-    return $html;
-}
-function post_action_form(string $action, string $label, array $fields = [], string $class = '', string $confirm = ''): string
-{
-    $confirm_attr = $confirm !== '' ? ' data-confirm="' . h($confirm) . '"' : '';
-    return '<form class="post-action-form" method="post" action="' . h($action) . '"' . $confirm_attr . '>' . form_token() . hidden_inputs($fields) . '<button type="submit"' . ($class !== '' ? ' class="' . h($class) . '"' : '') . '>' . h($label) . '</button></form>';
-}
 function require_post(): void
 {
     if (!is_post_request()) err('请求方式错误');
-}
-function svg_icon(string $name): string
-{
-    static $icons = [
-        'user' => '<circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/><path d="M4 21c1.8-4 4.5-6 8-6s6.2 2 8 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
-        'id' => '<rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="10" r="2" stroke="currentColor" stroke-width="1.8"/><path d="M5.5 15c.7-1.4 1.5-2 2.5-2s1.8.6 2.5 2M13 10h5M13 14h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
-        'reply' => '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>',
-        'notify' => '<path d="M12 18.5a2.5 2.5 0 0 0 2.4-1.8H9.6a2.5 2.5 0 0 0 2.4 1.8Zm7-4.5-1.6-1.9V10a5.4 5.4 0 0 0-4.4-5.3V4a1 1 0 1 0-2 0v.7A5.4 5.4 0 0 0 6.6 10v2.1L5 14v1h14z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
-        'forum' => '<path d="M4 5h16v14H4z" stroke="currentColor" stroke-width="2"/><path d="M8 9h8M8 13h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
-        'topic' => '<path d="M5 4h14v16H5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 8h8M8 12h8M8 16h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
-        'view' => '<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>',
-        'settings' => '<path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
-        'admin' => '<path d="M12 3 4 6v6c0 5 3.4 7.8 8 9 4.6-1.2 8-4 8-9V6l-8-3Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 12l2 2 4-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
-        'pages' => '<path d="M8 4h9a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9.5 9h6M9.5 12.5h6M9.5 16h3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
-    ];
-    return isset($icons[$name]) ? '<svg class="meta-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">' . $icons[$name] . '</svg>' : '';
-}
-function avatar_tag(int $uid, string $name, string $class = ''): string
-{
-    $classes = trim('avatar-img ' . $class);
-    return '<img class="' . h($classes) . '" src="' . h(asset_url('app/assets/avatar.svg')) . '" alt="' . h($name) . '" loading="lazy">';
-}
-function avatar_link_tag(int $uid, string $name, string $class = ''): string
-{
-    $avatar = avatar_tag($uid, $name, $class);
-    if ($uid < 1) return $avatar;
-    return '<a class="avatar-profile-link" href="' . h(route_url('user', ['id' => $uid])) . '" aria-label="查看 ' . h($name) . ' 的个人主页">' . $avatar . '</a>';
 }
 function app_url(string $path = ''): string
 {
@@ -1124,33 +846,64 @@ function markdown_html(string $text, int $quote_depth = 0, int $topic_id = 0): s
     if ($text === '') return '';
     return '<p>' . str_replace("\n", '<br>', content_special_links_html(h($text), $topic_id)) . '</p>';
 }
-function topic_post_row(array $row, string $body, int $time, string $ops = '', string $title = '', string $stats = '', bool $highlight = false, array $ctx = []): string
+/** 通知正文的富文本渲染：Markdown + 把《主题标题》整体做成一个链接 */
+function notification_content_html(array $n): string
 {
-    $is_reply = isset($row['topic_id']);
-    $topic_id = $is_reply ? (int)$row['topic_id'] : (int)($row['id'] ?? 0);
-    $floor = $is_reply ? (int)($ctx['reply_position'] ?? 0) : 0;
-    $has_title = $title !== '';
-    $title_html = $has_title ? '<div class="post-topic-title"><h1 class="post-content-title">' . h($title) . '</h1>' . $stats . '</div>' : '';
-    $avatar = avatar_link_tag((int)$row['user_id'], (string)$row['username']);
-    $floor_attr = $floor > 0 ? ' data-floor="' . $floor . '"' : '';
-    $floor_html = $floor > 0 ? '<a class="post-floor" href="' . h(route_url('topic', ['id' => $topic_id, 'floor' => $floor])) . '">#' . $floor . '</a>' : '';
-    $ops_html = $ops !== '' || $floor_html !== '' ? '<div class="post-ops">' . $ops . $floor_html . '</div>' : '';
-    $uid_html = ((int)($row['user_id'] ?? 0) > 0 && (string)($row['username'] ?? '') !== '匿名') ? '<span class="post-user-group user-uid-badge" title="用户 UID"><span class="user-uid-icon" aria-hidden="true">' . svg_icon('id') . '</span>' . (int)$row['user_id'] . '</span>' : '';
-    $tags_html = topic_user_group_html($row) . user_state_tag_html($row) . $uid_html;
-    $html = '<li class="post-item post-entry' . ($has_title ? ' has-title' : '') . ($highlight ? ' post-highlight' : '') . '" id="post-' . (int)($row['id'] ?? 0) . '"' . $floor_attr . '>' . $title_html . '<div class="post-avatar">' . $avatar . '</div><div class="post-body"><div class="post-head' . ($floor > 0 ? ' has-floor' : '') . '"><div class="post-info"><a class="post-title post-author" href="' . h(route_url('user', ['id' => (int)$row['user_id']])) . '">' . h($row['username']) . '</a><span class="post-time">' . human_time($time) . '</span></div>' . $ops_html . '</div><div class="post-meta">' . $tags_html . '</div></div><div class="post-content">' . markdown_html($body, 0, $topic_id) . '</div></li>';
-    return $html;
+    $body = (string)($n['content'] ?? '');
+    $content_html = markdown_html($body);
+    if ((int)($n['topic_id'] ?? 0) <= 0 && (int)($n['reply_id'] ?? 0) <= 0) return $content_html;
+    $url = notification_link($n);
+    if ($url === '') return $content_html;
+    $title_marker = "\x1ENOTIFICATION_TOPIC_TITLE\x1E";
+    $topic_title = '';
+    $source = preg_replace_callback('/《((?:[^《》]|(?R))*)》/u', static function (array $match) use (&$topic_title, $title_marker): string {
+        $topic_title = $match[1];
+        return '《' . $title_marker . '》';
+    }, $body, 1, $count);
+    if (is_string($source) && $count > 0) {
+        // 标题整体做成一个链接，标题里的 @ 提及就不会产生嵌套的 a 标签
+        return str_replace($title_marker, '<a href="' . h($url) . '">' . h($topic_title) . '</a>', markdown_html($source));
+    }
+    $view_link = '<a href="' . h($url) . '">查看主题</a>';
+    $content_html = preg_replace('/<\/p>\s*$/u', ' ' . $view_link . '</p>', $content_html, 1, $paragraph_count) ?? $content_html;
+    if ($paragraph_count < 1) $content_html .= ' ' . $view_link;
+    return $content_html;
 }
-function quote_reply_action(array $row, int $floor = 0): string
+/** 字段的长度上下限，模板据此决定是否输出 minlength / maxlength */
+function length_limits(string $name): array
 {
-    $floor_attr = $floor > 0 ? ' data-floor="' . $floor . '"' : '';
-    return '<a class="icon-action icon-quote quote-reply" href="#reply" data-username="' . h((string)$row['username']) . '"' . $floor_attr . ' title="回复"><span>回复</span></a>';
+    return match ($name) {
+        'username' => [length_limit('username', 'min'), length_limit('username', 'max')], 'email' => [length_limit('email', 'min'), length_limit('email', 'max')],
+        'bio' => [length_limit('bio', 'min'), length_limit('bio', 'max')], 'q' => [length_limit('search', 'min'), length_limit('search', 'max')],
+        'title' => [length_limit('title', 'min'), length_limit('title', 'max')], 'content' => [0, DB_TEXT_MAX_LENGTH],
+        'body' => [min(length_limit('topic_body', 'min'), length_limit('reply_body', 'min')), max(length_limit('topic_body', 'max'), length_limit('reply_body', 'max'))],
+        default => [null, null],
+    };
 }
-function topic_list_select_columns(): string
+/** 当前用户可以发帖的版块，id => 名称，供模板渲染版块下拉 */
+/** 分页数据；无分页可显示时返回 null，模板据此决定是否渲染外层容器 */
+function pagination_data(bool $simple, int $total, int $page, int $size, string $url, bool $has_next = false, bool $limited = true): ?array
 {
-    static $cached = null;
-    if ($cached !== null) return $cached;
-    $columns = 'id,title,highlight_style,created_at,reply_count,last_reply_at,last_reply_user_id,forum_id,user_id';
-    return $cached = $columns;
+    if ($simple) {
+        $more = (!$limited || $page < max_pagination_pages()) && $has_next;
+        if ($page <= 1 && !$more) return null;
+        return ['kind' => 'simple', 'has_prev' => $page > 1, 'has_next' => $more, 'page' => $page, 'url' => $url, 'limited' => $limited];
+    }
+    $pages = max(1, (int)ceil($total / $size));
+    if ($limited) $pages = min($pages, max_pagination_pages());
+    if ($pages <= 1) return null;
+    return ['kind' => 'full', 'total' => $total, 'page' => $page, 'size' => $size, 'url' => $url, 'limited' => $limited];
+}
+function post_forum_options(): array
+{
+    $options = [];
+    foreach (forums_cache() as $f) if (forum_group_allowed($f, 'allow_post_groups')) $options[(int)$f['id']] = (string)$f['name'];
+    return $options;
+}
+/** 主题列表需要的列；列表不展示正文，所以不带 body */
+function topic_list_columns(): array
+{
+    return ['id', 'title', 'highlight_style', 'created_at', 'reply_count', 'last_reply_at', 'last_reply_user_id', 'forum_id', 'user_id'];
 }
 function search_min_chars(): int
 {
@@ -1190,7 +943,7 @@ function search_index_rebuild(string $type = 'all', int $start_id = 1): int
 function topic_list_rows_for_replies(array $reply_rows): array
 {
     if (!$reply_rows) return [];
-    $topics = rows_by_ids('app_topics', array_column($reply_rows, 'topic_id'), topic_list_select_columns());
+    $topics = topic_rows_by_ids(array_column($reply_rows, 'topic_id'));
     $rows = [];
     foreach ($reply_rows as $reply) {
         $topic_id = (int)$reply['topic_id'];
@@ -1212,60 +965,32 @@ function topic_list_rows_for_replies(array $reply_rows): array
     }
     return attach_topic_list_users($rows);
 }
-function topic_list_row(array $t, string $sort): string
+function twig(bool $cache = true): Twig\Environment
 {
-    $time = (int)($t['time'] ?? ($sort === 'post' ? $t['created_at'] : ($t['last_reply_at'] ?: $t['created_at'])));
-    if (!empty($t['reply_only'])) {
-        $reply_excerpt = trim((string)($t['my_reply_excerpt'] ?? ''));
-        $reply_excerpt_html = $reply_excerpt !== '' ? '<div class="profile-reply-excerpt">' . h($reply_excerpt) . '</div>' : '';
-        $user_link = '<a href="' . h(route_url('user', ['id' => (int)$t['user_id']])) . '">' . svg_icon('user') . h($t['username']) . '</a>';
-        $html = '<li class="post-item"><div class="post-avatar">' . avatar_link_tag((int)$t['user_id'], (string)$t['username']) . '</div><div class="post-body">' . $reply_excerpt_html . '<div class="post-meta"><span>' . $user_link . '</span><span>' . human_time($time) . '</span></div></div></li>';
-        return $html;
-    }
-    $forum = $t['forum'] ?? ['id' => (int)$t['forum_id'], 'name' => ''];
-    $has_forum = (int)($forum['id'] ?? 0) > 0 && trim((string)($forum['name'] ?? '')) !== '';
-    $user_link = '<a href="' . h(route_url('user', ['id' => (int)$t['user_id']])) . '">' . svg_icon('user') . h($t['username']) . '</a>';
-    $forum_link = $has_forum ? '<a href="' . h(route_url('forum', ['id' => (int)$forum['id']])) . '">' . h($forum['name']) . '</a>' : '';
-    $last_reply_username = (string)($t['last_reply_username'] ?? '');
-    $last_reply_user = $last_reply_username !== '' ? '<span>' . svg_icon('user') . h($last_reply_username) . '</span>' : '';
-    $time_meta = '<span>' . human_time($time) . '</span>';
-    $forum_meta = $has_forum ? '<span class="post-forum-meta">' . svg_icon('forum') . $forum_link . '</span>' : '';
-    $meta = '<span>' . $user_link . '</span>' . ($sort === 'post' ? $time_meta : '') . $forum_meta . '<span>' . svg_icon('reply') . (int)$t['reply_count'] . '</span>' . $last_reply_user . ($sort === 'post' ? '' : $time_meta);
-    $pages = topic_page_links((int)$t['id'], (int)$t['reply_count']);
-    $reply_id = (int)($t['my_reply_id'] ?? 0);
-    $topic_url = route_url('topic', ['id' => (int)$t['id'], 'replyid' => $reply_id > 0 ? $reply_id : null]);
-    $reply_excerpt = trim((string)($t['my_reply_excerpt'] ?? ''));
-    $reply_excerpt_html = $reply_excerpt !== '' ? '<div class="profile-reply-excerpt">' . h($reply_excerpt) . '</div>' : '';
-    $badges = ((int)($t['is_pinned'] ?? 0) ? '<span class="topic-badge pinned">置顶</span>' : '');
-    $style = (string)($t['highlight_style'] ?? '') !== '' ? ' style="' . h((string)$t['highlight_style']) . '"' : '';
-    $forum_badge = $has_forum ? '<a class="post-tag post-forum-badge" href="' . h(route_url('forum', ['id' => (int)$forum['id']])) . '">' . h($forum['name']) . '</a>' : '';
-    $html = '<li class="post-item' . ((int)($t['is_pinned'] ?? 0) ? ' topic-pinned' : '') . '"><div class="post-avatar">' . avatar_link_tag((int)$t['user_id'], (string)$t['username']) . '</div><div class="post-body"><div class="post-title-row">' . $badges . '<a class="post-title" href="' . h($topic_url) . '"' . $style . '>' . h($t['title']) . '</a>' . $pages . '</div>' . $reply_excerpt_html . '<div class="post-meta">' . $meta . '</div></div>' . $forum_badge . '</li>';
-    return $html;
-}
-function topic_stats_html(int $view_count, int $reply_count): string
-{
-    $stats = '';
-    if ($view_count > 0) $stats .= '<span>' . svg_icon('view') . $view_count . '</span>';
-    if ($reply_count > 0) $stats .= '<span>' . svg_icon('reply') . $reply_count . '</span>';
-    return $stats ? '<div class="post-content-stats">' . $stats . '</div>' : '';
-}
-function twig(): Twig\Environment
-{
-    static $env;
-    if ($env !== null) return $env;
+    static $envs = [];
+    if (isset($envs[$cache])) return $envs[$cache];
+    // 缓存目录位于 app/data/ 下，该目录不可用时只能退回无缓存渲染
     $env = new Twig\Environment(new Twig\Loader\FilesystemLoader(TEMPLATE_DIR), [
-        'cache' => DATA_DIR . '/twig-cache',
+        'cache' => $cache ? DATA_DIR . '/twig-cache' : false,
         'auto_reload' => true,
     ]);
-    $html_safe = ['route_url', 'index_url', 'admin_url', 'asset_url', 'app_url', 'svg_icon', 'avatar_tag', 'avatar_link_tag', 'form_token', 'hidden_inputs', 'input', 'textarea', 'checkbox', 'number_input', 'select_input', 'render_form_fields', 'select_forum', 'tab_bar_html', 'auth_tabs_html', 'admin_tabs', 'paginate', 'simple_paginate', 'topic_page_links', 'topic_list_row', 'topic_post_row', 'notification_row_html', 'notification_badge_html', 'sidebar_user_card_html', 'sidebar_notice_card_html', 'user_state_tag_html', 'topic_user_group_html', 'topic_stats_html', 'quote_reply_action', 'post_action_form', 'markdown_html', 'human_time', 'form_shell', 'shell_html', 'sidebar_stack_html', 'flash_json'];
-    foreach ($html_safe as $fn) $env->addFunction(new Twig\TwigFunction($fn, $fn, ['is_safe' => ['html']]));
-    foreach (['setting', 'csrf_token', 'uid', 'can_manage', 'can_speak', 'can_access_admin', 'is_super_user', 'notification_excerpt', 'excerpt_length', 'notification_link'] as $fn) $env->addFunction(new Twig\TwigFunction($fn, $fn));
+    // 模板里只保留「取数据」的函数，页面标记一律由 templates/macros 下的宏负责
+    foreach (['route_url', 'index_url', 'admin_url', 'asset_url', 'app_url', 'human_time', 'flash_json'] as $fn) $env->addFunction(new Twig\TwigFunction($fn, $fn, ['is_safe' => ['html']]));
+    foreach (['setting', 'csrf_token', 'uid', 'me', 'group_by_id', 'can_manage', 'can_speak', 'can_access_admin', 'is_super_user', 'can_manage_topic', 'can_manage_reply', 'notification_excerpt', 'excerpt_length', 'notification_link', 'length_limits', 'max_pagination_pages', 'append_url_query', 'post_forum_options', 'admin_tabs'] as $fn) $env->addFunction(new Twig\TwigFunction($fn, $fn));
+    // 正文是富文本渲染（Markdown 子集 + 提及/楼层链接），属于文本转换而非页面结构，保留为过滤器
+    $env->addFilter(new Twig\TwigFilter('markdown', markdown_html(...), ['is_safe' => ['html']]));
+    $env->addFilter(new Twig\TwigFilter('notification_content', notification_content_html(...), ['is_safe' => ['html']]));
     $env->addGlobal('app_version', APP_VERSION);
-    return $env;
+    return $envs[$cache] = $env;
 }
 function template(string $name, array $data = []): string
 {
     return twig()->render($name, $data);
+}
+/** 不落缓存的渲染，供 app/data/ 不可用时的初始化失败页使用 */
+function template_uncached(string $name, array $data = []): string
+{
+    return twig(false)->render($name, $data);
 }
 function flash_json(string $flash): string
 {
@@ -1293,7 +1018,6 @@ function page_nav_data(string $site_name): array
         'mine' => $mine,
         'mine_unread' => $mine ? (int)($mine['unread_notifications'] ?? 0) : 0,
         'mine_link' => $mine ? route_url('user', ['id' => (int)$mine['id'], 'tab' => 'notifications']) : route_url('login'),
-        'mine_avatar' => $mine ? avatar_tag((int)$mine['id'], (string)$mine['username'], 'mobile-nav-avatar') : svg_icon('user'),
         'visible_forums' => $visible,
         'has_more_forums' => count($forums) > $visible_limit,
         'all_forums' => $forums,
@@ -1326,74 +1050,6 @@ function render_page(string $template, array $data, string $title, array $seo = 
 {
     echo template($template, $data + page_common_data($title, $seo));
 }
-function form_field_caption(string $label, string $help = ''): string
-{
-    return '<span>' . h($label) . ($help !== '' ? '<small>' . h($help) . '</small>' : '') . '</span>';
-}
-function length_attributes(string $name): string
-{
-    $limits = match ($name) {
-        'username' => [length_limit('username', 'min'), length_limit('username', 'max')], 'email' => [length_limit('email', 'min'), length_limit('email', 'max')],
-        'bio' => [length_limit('bio', 'min'), length_limit('bio', 'max')], 'q' => [length_limit('search', 'min'), length_limit('search', 'max')],
-        'title' => [length_limit('title', 'min'), length_limit('title', 'max')], 'content' => [0, DB_TEXT_MAX_LENGTH],
-        'body' => [min(length_limit('topic_body', 'min'), length_limit('reply_body', 'min')), max(length_limit('topic_body', 'max'), length_limit('reply_body', 'max'))],
-        default => [null, null],
-    };
-    [$min, $max] = $limits;
-    return ($min !== null && $min > 0 ? ' minlength="' . $min . '"' : '') . ($max !== null ? ' maxlength="' . $max . '"' : '');
-}
-function input(string $label, string $name, mixed $value = '', string $type = 'text', bool $required = false, string $help = '', string $class = ''): string
-{
-    return '<label class="grid' . ($class !== '' ? ' ' . h($class) : '') . '">' . form_field_caption($label, $help) . '<input name="' . h($name) . '" type="' . h($type) . '" value="' . h($value) . '"' . length_attributes($name) . ($required ? ' required' : '') . '></label>';
-}
-function textarea(string $label, string $name, mixed $value = '', bool $required = false, string $help = '', string $class = ''): string
-{
-    return '<label class="grid' . ($class !== '' ? ' ' . h($class) : '') . '">' . form_field_caption($label, $help) . '<textarea name="' . h($name) . '"' . length_attributes($name) . ($required ? ' required' : '') . '>' . h($value) . '</textarea></label>';
-}
-function checkbox(string $label, string $name, bool $checked = false, string $help = '', string $class = ''): string
-{
-    return '<label class="grid' . ($class !== '' ? ' ' . h($class) : '') . '">' . form_field_caption($label, $help) . '<input type="checkbox" name="' . h($name) . '" value="1"' . ($checked ? ' checked' : '') . '></label>';
-}
-function number_input(string $label, string $name, mixed $value = '', int|float|null $min = null, int|float|null $max = null, bool $required = true, string $help = '', string $class = ''): string
-{
-    $limits = ($min !== null ? ' min="' . h($min) . '"' : '') . ($max !== null ? ' max="' . h($max) . '"' : '');
-    return '<label class="grid' . ($class !== '' ? ' ' . h($class) : '') . '">' . form_field_caption($label, $help) . '<input name="' . h($name) . '" type="number" value="' . h($value) . '"' . $limits . ($required ? ' required' : '') . '></label>';
-}
-function select_input(string $label, string $name, mixed $value, array $options, string $help = '', string $class = ''): string
-{
-    $html = '<label class="grid' . ($class !== '' ? ' ' . h($class) : '') . '">' . form_field_caption($label, $help) . '<select name="' . h($name) . '">';
-    foreach ($options as $option_value => $option_label) $html .= '<option value="' . h($option_value) . '"' . ((string)$option_value === (string)$value ? ' selected' : '') . '>' . h($option_label) . '</option>';
-    return $html . '</select></label>';
-}
-function render_form_fields(array $fields, array $values = []): string
-{
-    $html = '';
-    foreach ($fields as $name => $field) {
-        if (isset($field['html'])) {
-            $html .= (string)$field['html'];
-            continue;
-        }
-        $type = (string)($field['type'] ?? 'text');
-        $label = (string)($field['label'] ?? $name);
-        $value = array_key_exists('value', $field) ? $field['value'] : ($values[$name] ?? '');
-        $help = (string)($field['help'] ?? '');
-        $class = (string)($field['class'] ?? '');
-        if ($help !== '' && !str_contains(' ' . $class . ' ', ' settings-help-field ')) $class = trim($class . ' settings-help-field');
-        if ($type === 'checkbox') $html .= checkbox($label, (string)$name, (bool)(int)$value, $help, $class);
-        elseif ($type === 'number') $html .= number_input($label, (string)$name, $value, $field['min'] ?? null, $field['max'] ?? null, (bool)($field['required'] ?? true), $help, $class);
-        elseif ($type === 'select') $html .= select_input($label, (string)$name, $value, (array)($field['options'] ?? []), $help, $class);
-        elseif ($type === 'textarea') $html .= textarea($label, (string)$name, $value, !empty($field['required']), $help, $class);
-        else $html .= input($label, (string)$name, $value, $type, !empty($field['required']), $help, $class);
-    }
-    return $html;
-}
-function select_forum(int $fid): string
-{
-    $options = [];
-    foreach (forums_cache() as $f) if (forum_group_allowed($f, 'allow_post_groups')) $options[(int)$f['id']] = (string)$f['name'];
-    if ($fid <= 0) $fid = (int)(array_key_first($options) ?? 0);
-    return select_input('版块', 'forum_id', $fid, $options);
-}
 function default_post_forum_id(): int
 {
     foreach (forums_cache() as $forum) if (forum_group_allowed($forum, 'allow_post_groups')) return (int)$forum['id'];
@@ -1410,7 +1066,17 @@ function can_manage_reply(array $r): bool
 }
 function refresh_topic_stats(int $tid): void
 {
-    q("UPDATE app_topics SET reply_count=(SELECT COUNT(*) FROM app_replies WHERE topic_id=?),last_reply_at=COALESCE((SELECT created_at FROM app_replies WHERE topic_id=? ORDER BY created_at DESC,id DESC LIMIT 1),created_at),last_reply_user_id=COALESCE((SELECT user_id FROM app_replies WHERE topic_id=? ORDER BY created_at DESC,id DESC LIMIT 1),0) WHERE id=?", [$tid, $tid, $tid, $tid]);
+    // 原来是单条相关子查询 UPDATE（天然原子）。拆成读+写之后要放进事务里，保持同样的原子性。
+    Database::connection()->transaction(static function () use ($tid): void {
+        $topic = Topic::find($tid);
+        if (!$topic) return;
+        $last = Reply::where('topic_id', $tid)->orderByDesc('created_at')->orderByDesc('id')->first(['created_at', 'user_id']);
+        $topic->update([
+            'reply_count' => Reply::where('topic_id', $tid)->count(),
+            'last_reply_at' => $last ? (int)$last->created_at : (int)$topic->created_at,
+            'last_reply_user_id' => $last ? (int)$last->user_id : 0,
+        ]);
+    });
 }
 function require_password_length(string $password): void
 {
@@ -1432,40 +1098,35 @@ function save_user(?int $target_user_id = null): void
     $username = post('username', length_limit('username', 'max'));
     $email = post('email', length_limit('email', 'max'));
     $bio = post('bio', length_limit('bio', 'max'));
-    $old_user = $user_id ? row('app_users', 'id', $user_id) : null;
+    $old_user = $user_id ? User::find($user_id) : null;
     if ($user_id && !$old_user) err('用户不存在');
     if ($old_user) {
-        $username = (string)$old_user['username'];
-        $email = (string)$old_user['email'];
+        $username = (string)$old_user->username;
+        $email = (string)$old_user->email;
     }
     if ($username === '') err('用户名不能为空');
     require_length($username, length_limit('username', 'min'), '用户名');
     require_length($email, length_limit('email', 'min'), '邮箱地址');
     require_length($bio, length_limit('bio', 'min'), '个人简介');
-    $gid = $old_user ? (int)$old_user['group_id'] : (int)setting('default_group_id', '2');
+    $gid = $old_user ? (int)$old_user->group_id : (int)setting('default_group_id', '2');
     if (!group_by_id($gid)) err('用户组不存在');
     $pwd = (string)($_POST['password'] ?? '');
     $pwd2 = (string)($_POST['password2'] ?? '');
     if ($pwd !== '') require_password_length($pwd);
     if ($pwd !== '' && $pwd !== $pwd2) err('两次密码不一致');
-    if (!$old_user || (string)$old_user['username'] !== $username) require_valid_username($username);
+    if (!$old_user || (string)$old_user->username !== $username) require_valid_username($username);
     if ($is_registration && preg_match_all('/./us', $username) < length_limit('username', 'min')) err('用户名长度不能少于' . length_limit('username', 'min') . '个字符');
     if ($is_registration && preg_match_all('/./us', $username) > length_limit('username', 'max')) err('用户名不能超过' . length_limit('username', 'max') . '个字符');
-    $exists = $user_id ? one("SELECT id FROM app_users WHERE username=? AND id<>?", [$username, $user_id]) : one("SELECT id FROM app_users WHERE username=?", [$username]);
-    if ($exists) err('用户名已存在');
+    if (User::where('username', $username)->when($user_id, static fn($query) => $query->where('id', '<>', $user_id))->exists()) err('用户名已存在');
     if ($user_id) {
-        $sql = "UPDATE app_users SET username=?,email=?,bio=? WHERE id=?";
-        $p = [$username, $email, $bio, $user_id];
-        if ($pwd !== '') {
-            $sql = "UPDATE app_users SET username=?,email=?,bio=?,password=? WHERE id=?";
-            $p = [$username, $email, $bio, password_hash($pwd, PASSWORD_DEFAULT), $user_id];
-        }
-        q($sql, $p);
+        $values = ['username' => $username, 'email' => $email, 'bio' => $bio];
+        if ($pwd !== '') $values['password'] = password_hash($pwd, PASSWORD_DEFAULT);
+        User::whereKey($user_id)->update($values);
         if ($pwd !== '' && $user_id === uid()) csrf_cookie_clear();
     } else {
         if ($pwd === '') err('密码不能为空');
-        q("INSERT INTO app_users(username,password,email,bio,group_id,created_at) VALUES(?,?,?,?,?,?)", [$username, password_hash($pwd, PASSWORD_DEFAULT), $email, $bio, $gid, now()]);
-        $GLOBALS['__last_saved_user_id'] = app_db_last_insert_id('app_users');
+        $saved_user = User::create(['username' => $username, 'password' => password_hash($pwd, PASSWORD_DEFAULT), 'email' => $email, 'bio' => $bio, 'group_id' => $gid, 'created_at' => now()]);
+        $GLOBALS['__last_saved_user_id'] = (int)$saved_user->id;
     }
 }
 function base_url(): string
@@ -1527,7 +1188,7 @@ function save_topic(): int
     $title = post('title', length_limit('title', 'max'));
     $body = post('body', length_limit('topic_body', 'max'));
     if ($topic_id) {
-        $t = row('app_topics', 'id', $topic_id) ?: err('主题不存在');
+        $t = Topic::find($topic_id)?->toArray() ?: err('主题不存在');
         if (!can_manage_topic($t)) err('无权限');
         if ($action !== '' && !can_manage()) err('无权限');
         if (in_array($action, ['delete_topic', 'delete_topic_replies'], true)) {
@@ -1552,12 +1213,12 @@ function save_topic(): int
                 if (!in_array($bold_action, ['bold', 'unbold'], true)) err('请选择加粗操作');
                 $bold = $bold_action === 'bold';
             }
-            q("UPDATE app_topics SET highlight_style=? WHERE id=?", [topic_title_style($color, $bold), (int)$t['id']]);
+            Topic::whereKey($t['id'])->update(['highlight_style' => topic_title_style($color, $bold)]);
             go(route_url('topic', ['id' => (int)$t['id']]));
         }
         if ($action === 'mute_author') {
             if ((int)$t['user_id'] === 1) err('不能操作超级管理员');
-            q("UPDATE app_users SET is_muted=1 WHERE id=?", [(int)$t['user_id']]);
+            User::whereKey((int)$t['user_id'])->update(['is_muted' => 1]);
             go(route_url('topic', ['id' => (int)$t['id']]));
         }
         if ($action === '') {
@@ -1570,8 +1231,8 @@ function save_topic(): int
             $body = (string)($t['body'] ?? '');
         }
         $reply_order = (int)($_POST['reply_order'] ?? 0) === 1 ? 1 : 0;
-        tx(function () use ($topic_id, $fid, $title, $body, $reply_order) {
-            q("UPDATE app_topics SET forum_id=?,title=?,body=?,reply_order=? WHERE id=?", [$fid, $title, $body, $reply_order, $topic_id]);
+        Database::connection()->transaction(static function () use ($topic_id, $fid, $title, $body, $reply_order): void {
+            Topic::whereKey($topic_id)->update(['forum_id' => $fid, 'title' => $title, 'body' => $body, 'reply_order' => $reply_order]);
         });
         return $topic_id;
     }
@@ -1587,10 +1248,10 @@ function save_topic(): int
     require_length($title, length_limit('title', 'min'), '标题');
     require_length($body, length_limit('topic_body', 'min'), '主题内容');
     $ts = now();
-    $tid = tx(function () use ($fid, $author_id, $title, $body, $ts) {
-        q("INSERT INTO app_topics(forum_id,user_id,title,body,created_at,last_reply_at) VALUES(?,?,?,?,?,?)", [$fid, $author_id, $title, $body, $ts, $ts]);
-        $tid = app_db_last_insert_id('app_topics');
-        q("UPDATE app_users SET last_post_at=? WHERE id=?", [$ts, $author_id]);
+    $tid = Database::connection()->transaction(static function () use ($fid, $author_id, $title, $body, $ts): int {
+        $saved = Topic::create(['forum_id' => $fid, 'user_id' => $author_id, 'title' => $title, 'body' => $body, 'created_at' => $ts, 'last_reply_at' => $ts]);
+        $tid = (int)$saved->id;
+        User::whereKey($author_id)->update(['last_post_at' => $ts]);
         create_topic_notifications($tid, $body, $author_id);
         return $tid;
     });
@@ -1603,22 +1264,22 @@ function save_reply(): array
     if (!$reply_id) check_post_interval();
     $r = null;
     if ($reply_id) {
-        $r = row('app_replies', 'id', $reply_id) ?: err('回复不存在');
+        $r = Reply::find($reply_id)?->toArray() ?: err('回复不存在');
         if (!can_manage_reply($r)) err('无权限');
         if (trim((string)$r['body']) === '') err('回复已删除，无法编辑');
         $tid = (int)$r['topic_id'];
     } else {
         $tid = max(1, (int)$_POST['topic_id']);
     }
-    $topic = row('app_topics', 'id', $tid) ?: err('主题不存在');
+    $topic = Topic::find($tid)?->toArray() ?: err('主题不存在');
     $forum = forum_by_id((int)$topic['forum_id']) ?: err('版块不存在');
     if (!forum_group_allowed($forum, 'allow_reply_groups')) err('无权限');
     $body = post('body', length_limit('reply_body', 'max'));
     if ($body === '') err('回复不能为空');
     require_length($body, length_limit('reply_body', 'min'), '回帖内容');
     if ($reply_id) {
-        tx(function () use ($body, $tid, $reply_id) {
-            q("UPDATE app_replies SET body=?,updated_at=? WHERE id=? AND topic_id=?", [$body, now(), $reply_id, $tid]);
+        Database::connection()->transaction(static function () use ($body, $tid, $reply_id): void {
+            Reply::whereKey($reply_id)->where('topic_id', $tid)->update(['body' => $body, 'updated_at' => now()]);
         });
         return ['topic_id' => (int)$r['topic_id'], 'reply_id' => (int)$r['id']];
     }
@@ -1628,11 +1289,11 @@ function save_reply(): array
     $body = $author['body'];
     if ($body === '') err('回复不能为空');
     $ts = now();
-    $rid = tx(function () use ($tid, $author_id, $body, $ts) {
-        q("INSERT INTO app_replies(topic_id,user_id,body,created_at,updated_at) VALUES(?,?,?,?,?)", [$tid, $author_id, $body, $ts, $ts]);
-        $rid = app_db_last_insert_id('app_replies');
-        q("UPDATE app_users SET last_post_at=? WHERE id=?", [$ts, $author_id]);
-        q("UPDATE app_topics SET reply_count=reply_count+1,last_reply_at=?,last_reply_user_id=? WHERE id=?", [$ts, $author_id, $tid]);
+    $rid = Database::connection()->transaction(static function () use ($tid, $author_id, $body, $ts): int {
+        $saved = Reply::create(['topic_id' => $tid, 'user_id' => $author_id, 'body' => $body, 'created_at' => $ts, 'updated_at' => $ts]);
+        $rid = (int)$saved->id;
+        User::whereKey($author_id)->update(['last_post_at' => $ts]);
+        Topic::whereKey($tid)->increment('reply_count', 1, ['last_reply_at' => $ts, 'last_reply_user_id' => $author_id]);
         create_reply_notifications($tid, $rid, $body, $author_id);
         return $rid;
     });
@@ -1662,15 +1323,17 @@ function floor_index_clear(): void
 function floor_index_record(int $topic_id, int $reply_id, int $created_at): void
 {
     if (!app_topics_del_ready()) return;
-    q('INSERT INTO app_topics_del(topic_id,reply_id,created_at) VALUES(?,?,?)', [$topic_id, $reply_id, $created_at]);
+    TopicDeletion::create(['topic_id' => $topic_id, 'reply_id' => $reply_id, 'created_at' => $created_at]);
     floor_index_clear();
 }
 function topic_floor_index(int $topic_id): array
 {
     if (isset($GLOBALS['__floor_cache'][$topic_id])) return $GLOBALS['__floor_cache'][$topic_id];
     if (!app_topics_del_ready()) return $GLOBALS['__floor_cache'][$topic_id] = [];
-    $rows = q('SELECT reply_id AS id,created_at FROM app_topics_del WHERE topic_id=? ORDER BY created_at,id', [$topic_id])->fetchAll();
-    return $GLOBALS['__floor_cache'][$topic_id] = array_map(static fn(array $r): array => ['id' => (int)$r['id'], 'created_at' => (int)$r['created_at']], $rows);
+    return $GLOBALS['__floor_cache'][$topic_id] = TopicDeletion::where('topic_id', $topic_id)->orderBy('created_at')->orderBy('id')
+        ->get(['reply_id', 'created_at'])
+        ->map(static fn(TopicDeletion $row): array => ['id' => (int)$row->reply_id, 'created_at' => (int)$row->created_at])
+        ->all();
 }
 function gap_before(array $del, int $created_at, int $reply_id): int
 {
@@ -1683,9 +1346,18 @@ function gap_before(array $del, int $created_at, int $reply_id): int
     }
     return $lo;
 }
+/** 某个 (created_at,id) 位置之前还有多少条存活回复；楼层号要把删掉的空洞算进去 */
+function replies_before_count(int $topic_id, int $created_at, int $reply_id): int
+{
+    return Reply::where('topic_id', $topic_id)
+        ->where(static function ($query) use ($created_at, $reply_id): void {
+            $query->where('created_at', '<', $created_at)
+                ->orWhere(static fn($sub) => $sub->where('created_at', $created_at)->where('id', '<', $reply_id));
+        })->count();
+}
 function reply_position_floor(int $topic_id, int $created_at, int $reply_id): int
 {
-    $floor = 1 + (int)q('SELECT COUNT(*) FROM app_replies WHERE topic_id=? AND (created_at<? OR (created_at=? AND id<?))', [$topic_id, $created_at, $created_at, $reply_id])->fetchColumn();
+    $floor = 1 + replies_before_count($topic_id, $created_at, $reply_id);
     foreach (topic_floor_index($topic_id) as $gap) {
         if ($gap['created_at'] < $created_at || ($gap['created_at'] === $created_at && $gap['id'] < $reply_id)) $floor++;
     }
@@ -1697,7 +1369,7 @@ function floor_live_position(int $topic_id, int $floor): int
     $i = 0;
     foreach (topic_floor_index($topic_id) as $gap) {
         $i++;
-        $live_before = (int)q('SELECT COUNT(*) FROM app_replies WHERE topic_id=? AND (created_at<? OR (created_at=? AND id<?))', [$topic_id, (int)$gap['created_at'], (int)$gap['created_at'], (int)$gap['id']])->fetchColumn();
+        $live_before = replies_before_count($topic_id, (int)$gap['created_at'], (int)$gap['id']);
         if ($live_before + $i < $floor) $pos--;
     }
     return max(1, $pos);
@@ -1715,46 +1387,47 @@ function apply_reply_floors(array $replies, array $topic, int $page, int $size, 
 }
 function del(string $table, int $id, bool $with_replies = false): void
 {
-    $tables = [
-        'users' => 'app_users',
-        'groups' => 'app_groups',
-        'forums' => 'app_forums',
-        'topics' => 'app_topics',
-        'replies' => 'app_replies',
+    $models = [
+        'users' => User::class,
+        'groups' => Group::class,
+        'forums' => Forum::class,
+        'topics' => Topic::class,
+        'replies' => Reply::class,
     ];
-    if (!isset($tables[$table])) err('参数错误');
+    if (!isset($models[$table])) err('参数错误');
     if (in_array($table, ['users', 'groups', 'forums'], true) && !can_manage()) err('无权限');
     if ($table === 'users' && $id === uid()) err('不能删除自己');
     if ($table === 'groups' && $id <= 2) err('内置用户组不能删除');
     if ($table === 'groups' && $id === (int)setting('default_group_id', '2')) err('默认用户组不能删除');
     if ($table === 'forums' && count(forums_cache()) <= 1) err('至少保留一个版块');
+    $model = $models[$table];
     if (in_array($table, ['users', 'topics', 'replies'], true)) {
-        $record = row($tables[$table], 'id', $id) ?: err('记录不存在');
-        $affected_topics = $table === 'users' ? q("SELECT DISTINCT topic_id FROM app_replies WHERE user_id=?", [$id])->fetchAll() : [];
-        tx(function () use ($table, $tables, $id, $record, $affected_topics, $with_replies) {
+        $record = $model::find($id)?->toArray() ?: err('记录不存在');
+        $affected_topics = $table === 'users' ? Reply::where('user_id', $id)->distinct()->pluck('topic_id')->all() : [];
+        Database::connection()->transaction(static function () use ($table, $model, $id, $record, $affected_topics, $with_replies): void {
             if ($table === 'replies') {
                 if (trim((string)$record['body']) === '') err('回复已删除');
                 floor_index_record((int)$record['topic_id'], $id, (int)$record['created_at']);
-                q('DELETE FROM app_replies WHERE id=?', [$id]);
+                $model::whereKey($id)->delete();
                 refresh_topic_stats((int)$record['topic_id']);
                 content_delete_notify($record, true, (int)$record['topic_id']);
                 return;
             }
             if ($table === 'topics' && $with_replies) {
-                foreach (q("SELECT * FROM app_replies WHERE topic_id=?", [$id])->fetchAll() as $reply) {
-                    floor_index_record((int)$reply['topic_id'], (int)$reply['id'], (int)$reply['created_at']);
-                    q('DELETE FROM app_replies WHERE id=?', [(int)$reply['id']]);
+                foreach (Reply::where('topic_id', $id)->get(['id', 'topic_id', 'created_at']) as $reply) {
+                    floor_index_record((int)$reply->topic_id, (int)$reply->id, (int)$reply->created_at);
+                    Reply::whereKey($reply->id)->delete();
                 }
             }
-            q('DELETE FROM ' . $tables[$table] . ' WHERE id=?', [$id]);
+            $model::whereKey($id)->delete();
             if ($table === 'topics') content_delete_notify($record, false);
             if ($table === 'users') {
-                foreach ($affected_topics as $topic) refresh_topic_stats((int)$topic['topic_id']);
+                foreach ($affected_topics as $topic_id) refresh_topic_stats((int)$topic_id);
             }
         });
         return;
     }
-    tx(fn() => q('DELETE FROM ' . $tables[$table] . ' WHERE id=?', [$id]));
+    Database::connection()->transaction(static fn() => $model::whereKey($id)->delete());
     if ($table === 'forums') forums_cache(true);
     else groups_cache(true);
 }
@@ -1762,17 +1435,18 @@ function login_page(): void
 {
     if (uid()) go(consume_auth_return_url());
     if (is_post_request()) {
-        $u = one("SELECT id,password FROM app_users WHERE username=?", [post('username', DB_STRING_MAX_LENGTH)]);
-        if ($u && password_verify((string)$_POST['password'], $u['password'])) {
-            complete_login((int)$u['id']);
+        $u = User::where('username', post('username', DB_STRING_MAX_LENGTH))->first(['id', 'password']);
+        if ($u && password_verify((string)$_POST['password'], (string)$u->password)) {
+            complete_login((int)$u->id);
             return;
         }
         err('用户名或密码错误');
     }
-    $sidebar = sidebar_stack_html([
-        sidebar_notice_card_html('登录注意事项', ['请使用用户名登录。', '密码区分大小写。', '公共设备登录后请及时退出。']),
-    ]);
-    render_page('login.html.twig', ['sidebar' => $sidebar], '登录');
+    render_page('login.html.twig', [
+        'auth_tabs' => auth_tab_items(),
+        'notice_title' => '登录注意事项',
+        'notice_items' => ['请使用用户名登录。', '密码区分大小写。', '公共设备登录后请及时退出。'],
+    ], '登录');
 }
 function register_page(): void
 {
@@ -1786,10 +1460,11 @@ function register_page(): void
         start_cookie_login($user_id);
         go(consume_auth_return_url());
     }
-    $sidebar = sidebar_stack_html([
-        sidebar_notice_card_html('注册注意事项', ['邮箱信息不会公开。', '请不要使用保留用户名或冒充他人。']),
-    ]);
-    render_page('register.html.twig', ['sidebar' => $sidebar, 'username_attributes' => length_attributes('username')], '注册');
+    render_page('register.html.twig', [
+        'auth_tabs' => auth_tab_items(),
+        'notice_title' => '注册注意事项',
+        'notice_items' => ['邮箱信息不会公开。', '请不要使用保留用户名或冒充他人。'],
+    ], '注册');
 }
 function profile_page(): void
 {
@@ -1823,8 +1498,8 @@ function user_page(): void
     if ($username === '' && uid() && id() === uid()) $user = me();
     else {
         $user = $username !== ''
-            ? one("SELECT id,username,bio,group_id,is_muted FROM app_users WHERE username=?", [$username])
-            : row('app_users', 'id', id());
+            ? User::where('username', $username)->first(['id', 'username', 'bio', 'group_id', 'is_muted'])?->toArray()
+            : User::find(id())?->toArray();
     }
     $user = $user ?: err('你访问的页面不存在', 404);
     $g = group_by_id((int)$user['group_id']) ?: ['name' => '用户'];
@@ -1852,44 +1527,52 @@ function topic_index_data(int $fid, ?array $user, string $profile_tab, string $q
     $has_next_page = false;
     $profile_empty = '';
     $unread_total = 0;
-    $where_parts = [];
-    $params = [];
-    if ($fid) {
-        $where_parts[] = 'forum_id=?';
-        $params[] = $fid;
-    }
-    if ($query !== '' && $search_field !== 'reply') {
-        [$condition, $search_params] = content_search_condition($query, $search_field);
-        $where_parts[] = '(' . $condition . ')';
-        $params = array_merge($params, $search_params);
-    }
-    $where = $where_parts ? 'WHERE ' . implode(' AND ', $where_parts) : '';
+    // 主题列表的基础条件：版块过滤 + 标题/正文搜索；个人页再叠加 user_id
+    $topic_list_query = static function () use ($fid, $query, $search_field) {
+        $builder = Topic::query();
+        if ($fid) $builder->where('forum_id', $fid);
+        if ($query !== '' && $search_field !== 'reply') {
+            [$condition, $params] = content_search_condition($query, $search_field);
+            $builder->whereRaw('(' . $condition . ')', $params);
+        }
+        return $builder;
+    };
+    $reply_columns = ['id', 'topic_id', 'user_id', 'body', 'created_at'];
     if ($profile_uid && $profile_tab === 'notifications') {
         $total = notifications_total($profile_uid);
         $unread_total = notifications_unread_total($profile_uid);
         $rows = notifications_list($profile_uid, $size, $offset);
     } elseif ($profile_uid && $profile_tab === 'replies') {
-        $total = (int)val("SELECT COUNT(*) FROM app_replies WHERE user_id=?", [$profile_uid]);
-        $reply_rows = q("SELECT id,topic_id,user_id,body,created_at FROM app_replies WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?", [$profile_uid, $size, $offset])->fetchAll();
+        $own_replies = static fn() => Reply::query()->where('user_id', $profile_uid);
+        $total = $own_replies()->count();
+        $reply_rows = $own_replies()->orderByDesc('created_at')->orderByDesc('id')
+            ->limit($size)->offset($offset)->get($reply_columns)->map->toArray()->all();
         $rows = topic_list_rows_for_replies($reply_rows);
     } elseif ($query !== '' && $search_field === 'reply') {
-        [$reply_condition, $reply_params] = content_search_condition($query, 'reply');
-        $reply_where = '(' . $reply_condition . ')' . ($profile_uid ? ' AND user_id=?' : '');
-        $reply_rows = q("SELECT id,topic_id,user_id,body,created_at FROM app_replies WHERE $reply_where ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?", array_merge($reply_params, $profile_uid ? [$profile_uid] : [], [$size + 1, $offset]))->fetchAll();
+        [$condition, $params] = content_search_condition($query, 'reply');
+        $search_replies = static function () use ($condition, $params, $profile_uid) {
+            $builder = Reply::query()->whereRaw('(' . $condition . ')', $params);
+            if ($profile_uid) $builder->where('user_id', $profile_uid);
+            return $builder;
+        };
+        $reply_rows = $search_replies()->orderByDesc('created_at')->orderByDesc('id')
+            ->limit($size + 1)->offset($offset)->get($reply_columns)->map->toArray()->all();
         $total = 0;
         $simple_pagination = true;
         $has_next_page = count($reply_rows) > $size;
         $rows = topic_list_rows_for_replies(array_slice($reply_rows, 0, $size));
     } else {
-        if ($profile_uid) {
-            $where = $where ? $where . ' AND user_id=?' : 'WHERE user_id=?';
-            $params[] = $profile_uid;
-        }
-        $total = $query !== '' ? 0 : (($fid || $profile_uid) ? (int)val("SELECT COUNT(*) FROM app_topics $where", $params) : (int)val('SELECT COUNT(*) FROM app_topics'));
-        $order = $sort === 'post' ? 'created_at DESC,id DESC' : 'last_reply_at DESC,id DESC';
-        $index_hint = '';
+        $list_query = static function () use ($topic_list_query, $profile_uid) {
+            $builder = $topic_list_query();
+            if ($profile_uid) $builder->where('user_id', $profile_uid);
+            return $builder;
+        };
+        $total = $query !== '' ? 0 : (($fid || $profile_uid) ? $list_query()->count() : Topic::query()->count());
         $query_size = $query !== '' ? $size + 1 : $size;
-        $rows = q("SELECT " . topic_list_select_columns() . " FROM app_topics$index_hint $where ORDER BY $order LIMIT ? OFFSET ?", array_merge($params, [$query_size, $offset]))->fetchAll();
+        $list = $list_query();
+        if ($sort === 'post') $list->orderByDesc('created_at')->orderByDesc('id');
+        else $list->orderByDesc('last_reply_at')->orderByDesc('id');
+        $rows = $list->limit($query_size)->offset($offset)->get(topic_list_columns())->map->toArray()->all();
         if ($query !== '') {
             $simple_pagination = true;
             $has_next_page = count($rows) > $size;
@@ -1897,7 +1580,7 @@ function topic_index_data(int $fid, ?array $user, string $profile_tab, string $q
         }
         $pinned_ids = (!$profile_uid && !$fid && $query === '' && $page === 1) ? pinned_topic_ids() : [];
         if ($pinned_ids) {
-            $pinned_rows = rows_by_ids('app_topics', $pinned_ids, topic_list_select_columns());
+            $pinned_rows = topic_rows_by_ids($pinned_ids);
             $ordered = [];
             foreach ($pinned_ids as $pinned_id) {
                 if (isset($pinned_rows[$pinned_id])) $ordered[] = $pinned_rows[$pinned_id] + ['is_pinned' => 1];
@@ -1969,7 +1652,7 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
         }
     }
     $page_query = $search_query . ($profile_uid ? 'tab=' . $profile_tab : 'sort=' . $sort);
-    $pagination = $data['simple_pagination'] ? simple_paginate($p > 1, $data['has_next_page'], $p, $url($page_query)) : paginate((int)$data['total'], $p, $size, $url($page_query));
+    $pagination = pagination_data((bool)$data['simple_pagination'], (int)$data['total'], $p, $size, $url($page_query), (bool)$data['has_next_page']);
     $is_home_first_page = !$profile_uid && !$filter_forum && $q === '' && $p === 1;
     $empty_text = $q !== '' ? '没有找到匹配的' . ($search_field === 'reply' ? '回帖' : '主题') : ((string)$data['profile_empty'] !== '' ? (string)$data['profile_empty'] : ($profile_uid ? ($profile_tab === 'replies' ? '暂无回帖' : '暂无主题') : '暂无主题'));
     render_page('home.html.twig', [
@@ -1987,7 +1670,7 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
         'notification_rows' => $notification_rows,
         'empty_text' => $empty_text,
         'pagination' => $pagination,
-        'sidebar' => sidebar_stack_html([sidebar_user_card_html($profile_uid ? $filter_user : null, false, $fid)]),
+        'sidebar_user' => $profile_uid ? $filter_user : null,
         'shell_class' => $profile_uid ? 'profile-mobile-sidebar' . ($own_profile ? ' profile-mobile-sidebar-own' : '') : ($is_home_first_page ? 'home-mobile-sidebar' : ''),
     ], $title, $seo);
 }
@@ -2005,8 +1688,11 @@ function forum_page(): void
 function topic_page_replies(array $topic, int $page, int $size, int $offset, bool $reply_desc): array
 {
     $ctx = ['topic' => $topic, 'page' => $page, 'page_size' => $size, 'offset' => $offset, 'reply_order' => $reply_desc ? 1 : 0];
-    $order = $reply_desc ? 'created_at DESC,id DESC' : 'created_at,id';
-    $replies = q("SELECT * FROM app_replies WHERE topic_id=? ORDER BY $order LIMIT ? OFFSET ?", [(int)$topic['id'], $size, $offset])->fetchAll();
+    $reply_query = Reply::where('topic_id', (int)$topic['id']);
+    $reply_query = $reply_desc
+        ? $reply_query->orderByDesc('created_at')->orderByDesc('id')
+        : $reply_query->orderBy('created_at')->orderBy('id');
+    $replies = $reply_query->limit($size)->offset($offset)->get()->map->toArray()->all();
     $posts = attach_users(array_merge([$topic], $replies));
     $topic = array_shift($posts);
     $replies = $posts;
@@ -2016,26 +1702,21 @@ function topic_page_replies(array $topic, int $page, int $size, int $offset, boo
 function topic_page_view(array $view): array
 {
     extract($view, EXTR_SKIP);
-    $topic_ops = uid() ? quote_reply_action($t) : '';
-    if (can_manage_topic($t)) $topic_ops .= '<a class="icon-action icon-edit" href="' . h(route_url('topic_edit', ['id' => (int)$t['id']])) . '" title="编辑"><span>编辑</span></a>';
     $reply_rows = [];
     foreach ($replies as $i => $r) {
         if (trim((string)$r['body']) === '') continue;
         $reply_floor = (int)($r['reply_floor'] ?? ($reply_desc ? (int)$t['reply_count'] - $off - $i : $off + $i + 1));
-        $reply_ops = uid() ? quote_reply_action($r, $reply_floor) : '';
-        if (can_manage_reply($r)) $reply_ops .= '<a class="icon-action icon-edit" href="' . h(route_url('reply_edit', ['id' => (int)$r['id']])) . '" title="编辑"><span>编辑</span></a>';
-        $reply_rows[] = $r + ['ops' => $reply_ops, 'floor' => $reply_floor, 'highlight' => $floor > 0 ? $reply_floor === $floor : (int)$r['id'] === $replyid];
+        $reply_rows[] = $r + ['floor' => $reply_floor, 'highlight' => $floor > 0 ? $reply_floor === $floor : (int)$r['id'] === $replyid];
     }
     $can_reply_forum = forum_group_allowed($forum, 'allow_reply_groups');
     return [
         't' => $t,
         'forum' => $forum,
         'topic_url' => route_url('topic', ['id' => (int)$t['id']]),
-        'topic_ops' => $topic_ops,
         'page' => $p,
         'replies' => $replies,
         'reply_rows' => $reply_rows,
-        'pagination' => paginate((int)$t['reply_count'], $p, $size, route_url('topic', ['id' => (int)$t['id']]), false),
+        'pagination' => pagination_data(false, (int)$t['reply_count'], $p, $size, route_url('topic', ['id' => (int)$t['id']]), false, false),
         'can_reply_forum' => $can_reply_forum,
         'can_reply' => can_speak() && $can_reply_forum,
         'current_uid' => uid(),
@@ -2045,14 +1726,14 @@ function topic_page_view(array $view): array
 function topic_page(): void
 {
     if (!id() && id('replyid')) {
-        $reply = row('app_replies', 'id', id('replyid')) ?: err('你访问的帖子可能已经删除', 404);
+        $reply = Reply::find(id('replyid'))?->toArray() ?: err('你访问的帖子可能已经删除', 404);
         go(route_url('topic', ['id' => (int)$reply['topic_id'], 'replyid' => id('replyid')]));
     }
-    $t = row('app_topics', 'id', id()) ?: err('你访问的帖子可能已经删除', 404);
+    $t = Topic::find(id())?->toArray() ?: err('你访问的帖子可能已经删除', 404);
     $forum = forum_by_id((int)$t['forum_id']);
     if ($forum && !forum_group_allowed($forum, 'allow_view_groups')) err('无权限');
     if (mark_viewed((int)$t['id'])) {
-        q("UPDATE app_topics SET view_count=view_count+1 WHERE id=?", [(int)$t['id']]);
+        Topic::whereKey($t['id'])->increment('view_count');
         $t['view_count'] = (int)$t['view_count'] + 1;
     }
     $size = max(1, (int)setting('replies_per_page', '50'));
@@ -2068,7 +1749,7 @@ function topic_page(): void
         $anchor_pos = floor_live_position((int)$t['id'], $floor);
         $_GET['p'] = (string)max(1, $reply_desc ? (int)(((int)$t['reply_count'] - $anchor_pos) / $size) + 1 : (int)(($anchor_pos - 1) / $size) + 1);
     } elseif ($replyid > 0) {
-        $reply = row('app_replies', 'id', $replyid);
+        $reply = Reply::find($replyid)?->toArray();
         if ($reply && (int)$reply['topic_id'] !== (int)$t['id']) $reply = null;
         if ($reply) {
             $anchor_pos = floor_live_position((int)$t['id'], reply_position_floor((int)$t['id'], (int)$reply['created_at'], $replyid));
@@ -2092,31 +1773,24 @@ function topic_edit_page(): void
     $editing = $topic_id > 0;
     $t = ['id' => 0, 'forum_id' => id('fid') ?: default_post_forum_id(), 'title' => '', 'body' => '', 'user_id' => uid()];
     if ($editing) {
-        $t = row('app_topics', 'id', $topic_id) ?: err('主题不存在');
+        $t = Topic::find($topic_id)?->toArray() ?: err('主题不存在');
         if (!can_manage_topic($t)) err('无权限');
     }
     if (is_post_request()) go(route_url('topic', ['id' => save_topic()]));
     $title = $editing ? '编辑主题' : '发表主题';
-    $topic_ops = '';
+    $edit_ops = null;
     if ($editing && can_manage()) {
-        $style = topic_title_color((string)($t['highlight_style'] ?? ''));
-        $is_bold = topic_title_is_bold((string)($t['highlight_style'] ?? ''));
-        $is_pinned = in_array((int)$t['id'], pinned_topic_ids(), true);
-        $colors = ['#d94b4b', '#d97706', '#16a34a', '#2563eb', '#7c3aed'];
-        $swatches = '<div class="topic-color-swatches">';
-        foreach ($colors as $color) $swatches .= '<button class="topic-color-swatch' . ($style === $color ? ' active' : '') . '" type="button" data-topic-color="' . h($color) . '" style="background:' . h($color) . '" aria-label="' . h($color) . '"></button>';
-        $swatches .= '<button class="topic-color-swatch topic-color-clear' . ($style === '' ? ' active' : '') . '" type="button" data-topic-color="" aria-label="取消高亮"></button>';
-        $swatches .= '</div>';
-        $pin_options = '<option value="pin"' . ($is_pinned ? '' : ' selected') . '>置顶</option><option value="unpin"' . ($is_pinned ? ' selected' : '') . '>取消置顶</option>';
-        $bold_options = '<option value="bold"' . ($is_bold ? '' : ' selected') . '>加粗</option><option value="unbold"' . ($is_bold ? ' selected' : '') . '>取消加粗</option>';
-        $topic_ops = '<label class="grid topic-action-field"><span>操作</span><select name="topic_action" data-topic-action><option value="">不操作</option><option value="delete_topic">删除主题及回帖</option><option value="pin">置顶</option><option value="highlight">高亮</option><option value="bold">加粗</option><option value="mute_author">禁言作者</option></select></label><label class="grid topic-secondary-field is-hidden" data-topic-action-secondary="pin"><span>置顶</span><select name="topic_pin_action">' . $pin_options . '</select></label><label class="grid topic-highlight-field is-hidden" data-topic-action-secondary="highlight" data-topic-highlight-wrap><span>颜色</span><input type="hidden" name="highlight_style" value="' . h($style) . '" data-topic-highlight-value>' . $swatches . '</label><label class="grid topic-secondary-field is-hidden" data-topic-action-secondary="bold"><span>加粗</span><select name="topic_bold_action">' . $bold_options . '</select></label>';
+        $edit_ops = [
+            'style' => topic_title_color((string)($t['highlight_style'] ?? '')),
+            'is_bold' => topic_title_is_bold((string)($t['highlight_style'] ?? '')),
+            'is_pinned' => in_array((int)$t['id'], pinned_topic_ids(), true),
+        ];
     }
-    $reply_order = $editing ? select_input('回帖排序', 'reply_order', (string)(int)($t['reply_order'] ?? 0), ['0' => '发帖时间顺序', '1' => '发帖时间倒序']) : '';
     render_page('topic_edit.html.twig', [
         'title' => $title,
         't' => $t,
-        'reply_order' => $reply_order,
-        'topic_ops' => $topic_ops,
+        'editing' => $editing,
+        'edit_ops' => $edit_ops,
         'loading_text' => $editing ? '正在保存' : '正在发帖',
     ], $title);
 }
@@ -2127,19 +1801,19 @@ function reply_edit_page(): void
     $editing = $reply_id > 0;
     $r = ['id' => 0, 'topic_id' => id('topic_id'), 'body' => '', 'user_id' => uid()];
     if ($editing) {
-        $r = row('app_replies', 'id', $reply_id) ?: err('回复不存在');
+        $r = Reply::find($reply_id)?->toArray() ?: err('回复不存在');
         if (!can_manage_reply($r)) err('无权限');
         if (is_post_request() && ($_POST['do'] ?? '') === 'mute_author') {
             if (!can_manage()) err('无权限');
             if ((int)$r['user_id'] === 1) err('不能操作超级管理员');
-            q("UPDATE app_users SET is_muted=1 WHERE id=?", [(int)$r['user_id']]);
+            User::whereKey((int)$r['user_id'])->update(['is_muted' => 1]);
             go(route_url('topic', ['id' => (int)$r['topic_id'], 'replyid' => (int)$r['id']]));
         }
         if (is_post_request() && ($_POST['do'] ?? '') === 'delete') {
             if (trim((string)$r['body']) === '') err('回复已删除');
-            tx(function () use ($r) {
+            Database::connection()->transaction(static function () use ($r): void {
                 floor_index_record((int)$r['topic_id'], (int)$r['id'], (int)$r['created_at']);
-                q('DELETE FROM app_replies WHERE id=?', [(int)$r['id']]);
+                Reply::whereKey($r['id'])->delete();
                 refresh_topic_stats((int)$r['topic_id']);
                 content_delete_notify($r, true, (int)$r['topic_id']);
             });
@@ -2152,28 +1826,37 @@ function reply_edit_page(): void
         if (!empty($saved['redirect'])) go($saved['redirect']);
         if (ajax_request() && $editing) go(route_url('topic', ['id' => $saved['topic_id'], 'replyid' => $saved['reply_id']]));
         if (ajax_request()) {
-            $row = row('app_replies', 'id', $saved['reply_id']) ?: err('回复不存在');
+            $row = Reply::find($saved['reply_id'])?->toArray() ?: err('回复不存在');
             $row = attach_users([$row])[0];
-            $topic = row('app_topics', 'id', $saved['topic_id']) ?: ['view_count' => 0, 'reply_count' => 0, 'reply_order' => 0];
+            $topic = Topic::find($saved['topic_id'])?->toArray() ?: ['view_count' => 0, 'reply_count' => 0, 'reply_order' => 0];
             $floor = reply_position_floor((int)$topic['id'], (int)$row['created_at'], (int)$row['id']);
-            $ops = quote_reply_action($row, $floor);
-            if (can_manage_reply($row)) $ops .= '<a class="icon-action icon-edit" href="' . h(route_url('reply_edit', ['id' => (int)$row['id']])) . '" title="编辑"><span>编辑</span></a>';
             if ((int)($topic['reply_order'] ?? 0) === 1) go(route_url('topic', ['id' => $saved['topic_id'], 'replyid' => $saved['reply_id']]));
-            json_response(['ok' => 1, 'html' => topic_post_row($row, $row['body'], (int)$row['created_at'], $ops, '', '', false, ['reply_position' => $floor]), 'stats_html' => topic_stats_html((int)$topic['view_count'], (int)$topic['reply_count'])]);
+            json_response([
+                'ok' => 1,
+                'html' => template('partials/reply_post.html.twig', ['row' => $row, 'body' => (string)$row['body'], 'time' => (int)$row['created_at'], 'floor' => $floor, 'ops' => ['quote' => uid() > 0, 'edit' => can_manage_reply($row), 'edit_url' => route_url('reply_edit', ['id' => (int)$row['id']])]]),
+                'stats_html' => template('partials/topic_stats.html.twig', ['view_count' => (int)$topic['view_count'], 'reply_count' => (int)$topic['reply_count']]),
+            ]);
         }
         go(route_url('topic', ['id' => $saved['topic_id'], 'replyid' => $saved['reply_id']]));
     }
-    $reply_ops = (int)$r['id'] > 0 ? '<label class="grid reply-action-field"><span>操作</span><select name="do" data-reply-actions aria-label="回复操作"><option value="">不操作</option><option value="delete" data-confirm="确定删除该回复？">删除</option>' . (can_manage() ? '<option value="mute_author" data-confirm="确定禁言该作者？">禁言作者</option>' : '') . '</select></label>' : '';
-    render_page('reply_edit.html.twig', ['r' => $r, 'reply_ops' => $reply_ops], '编辑回复');
+    render_page('reply_edit.html.twig', ['r' => $r], '编辑回复');
 }
-function admin_tabs(string $tab): string
+/** 后台标签页的数据，渲染交给 ui.tabs */
+function admin_tabs(): array
 {
-    $items = [];
     $items = [];
     foreach (['settings' => '设置', 'forums' => '版块', 'groups' => '用户组'] as $key => $label) {
         $items[$key] = ['label' => $label, 'href' => admin_url(['tab' => $key])];
     }
-    return tab_bar_html($items, $tab, 'admin-tabs', 'admin.tabs');
+    return $items;
+}
+/** 登录/注册页顶部标签的数据 */
+function auth_tab_items(): array
+{
+    return [
+        'login' => ['label' => '登录', 'href' => route_url('login')],
+        'register' => ['label' => '注册', 'href' => route_url('register')],
+    ];
 }
 function form_error_route(): void
 {
@@ -2225,7 +1908,9 @@ function core_routes(): array
     ];
 }
 parse_path_route();
-if (!db_schema_ready()) Setup::bootstrap_run();
+// 先接上 Eloquent 再初始化，Bootstrap 里的建表和造数都走它
+Database::boot();
+if (!db_schema_ready()) Bootstrap::run();
 check();
 need_site_access();
 try {

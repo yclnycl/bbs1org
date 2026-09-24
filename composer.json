@@ -1,8 +1,13 @@
 {
     "require": {
+        "php": ">=8.2",
+        "illuminate/database": "^12.0",
         "twig/twig": "^3.11"
     },
     "config": {
-        "optimize-autoloader": true
+        "optimize-autoloader": true,
+        "platform": {
+            "php": "8.2.0"
+        }
     }
 }

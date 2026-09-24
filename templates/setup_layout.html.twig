@@ -1,26 +1,66 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-    <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>{{ title }}</title>
-    <link rel="icon" type="image/svg+xml" href="app/assets/index.svg">
+    <link rel="icon" type="image/svg+xml" href="{{ asset_url('app/assets/index.svg') }}">
+    {# 配色与尺寸直接取自主样式表的令牌，本页不再单独维护一套 #}
+    <link rel="stylesheet" href="{{ app_url('app/assets/index.css') }}?v={{ app_version }}">
     <style>
-    :root{--bg:#eef2f7;--panel:#fff;--line:#dfe6ee;--line2:#edf1f5;--text:#1f2937;--muted:#6b7280;--brand:#2563eb;--brand2:#1d4ed8;--ok:#059669;--warn:#b45309;--danger:#dc2626;--line-soft:var(--line2);--text-muted:var(--muted);--text-subtle:var(--muted);--text-disabled:var(--muted);--brand-hover:var(--brand2);--brand-soft:#eff6ff;--inverse:#111827;--inverse-text:#fff;--color-dark-rgb:31,41,55;--backdrop:rgba(var(--color-dark-rgb),.42);--shadow-medium:rgba(15,23,42,.18);--font-size-sm:12px;--font-size-md:14px;--font-size-lg:15px;--radius:10px;--radius-sm:8px;--focus-ring:rgba(37,99,235,.2)}
-    *{box-sizing:border-box}body{margin:0;color:var(--text);font:14px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
-    a{color:var(--brand);text-decoration:none}a:hover{color:var(--brand2)}.wrap{max-width:1060px;margin:0 auto;padding:24px 16px 40px}
-    .hero{display:grid;gap:8px;margin-bottom:18px}.hero h1{margin:0;font-size:28px;line-height:1.2}.hero p{margin:0;color:var(--muted)}
-    .grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:16px;align-items:start}.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 10px 24px rgba(15,23,42,.05)}
-    .card .hd{padding:16px 18px;border-bottom:1px solid var(--line2)}.card .hd h2{margin:0;font-size:16px}.card .bd{padding:16px 18px}
-    .note{margin:10px 0;padding:12px 14px;border:1px solid #dbeafe;background:#eff6ff;color:#1e3a8a;border-radius:8px}.warn{border-color:#fde68a;background:#fffbeb;color:#92400e}.ok{border-color:#bbf7d0;background:#f0fdf4;color:#166534}
-    .form{display:grid;gap:12px}.row{display:grid;gap:6px}.row label{font-size:12px;color:var(--muted)}.row small{color:var(--muted);font-size:11px;line-height:1.4}.row.compact{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}.row.compact .field{display:grid;gap:6px}.db-fields[hidden]{display:none}input[type=text],input[type=password],input[type=email],select,textarea{width:100%;border:1px solid #d6dbe3;border-radius:8px;padding:10px 12px;font:inherit;background:#fff;color:var(--text)}textarea{min-height:128px;resize:vertical}
-    input:focus,select:focus,textarea:focus{outline:0;border-color:#93c5fd;box-shadow:0 0 0 3px rgba(59,130,246,.12)}.db-fields{display:grid;gap:12px;padding:12px;border:1px solid var(--line2);border-radius:8px;background:#fafcff}.checks{display:grid;gap:10px}.check{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line2);border-radius:8px;background:#fafcff}.check input{margin-top:3px}
-    .actions{display:flex;gap:10px;align-items:center;justify-content:flex-end}.btn{display:inline-flex;align-items:center;justify-content:center;min-height:38px;padding:0 16px;border:0;border-radius:8px;background:var(--brand);color:#fff;cursor:pointer;font:inherit;font-weight:600}.btn:hover{background:var(--brand2);color:#fff}.btn.alt{background:#fff;color:#374151;border:1px solid #d1d5db}.btn.alt:hover{background:#f8fafc;color:#111;border-color:#cbd5e1}
-    .list{margin:0;padding-left:18px;color:#374151}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere;word-break:break-word}.kv{display:grid;width:100%;min-width:0;grid-template-columns:120px minmax(0,1fr);gap:8px 12px;font-size:13px}.kv div{min-width:0;max-width:100%;overflow-wrap:anywhere;word-break:break-word}.kv div:nth-child(odd){color:var(--muted)}.admin-pass{padding:14px;border:1px solid #fecaca;background:#fff1f2;color:#991b1b;border-radius:8px;word-break:break-all}.footer{margin-top:16px;color:var(--muted);font-size:12px;text-align:center}
-    @media (max-width:860px){.grid{grid-template-columns:1fr}.hero h1{font-size:24px}.wrap{padding:18px 12px 30px}}
+    /* 仅初始化失败页需要的补充样式 */
+    .init-wrap{
+        width: 100%;
+        max-width: 760px;
+        margin: 0 auto;
+        padding: var(--sp-8) var(--sp-4)
+    }
+
+    .hero{
+        display: grid;
+        gap: var(--sp-2);
+        margin-bottom: var(--sp-5)
+    }
+
+    .hero h1{
+        color: var(--ink)
+    }
+
+    .hero p{
+        margin: 0;
+        color: var(--ink-3);
+        font-size: var(--fs-lg)
+    }
+
+    .card .hd{
+        padding: var(--sp-3) var(--sp-4);
+        border-bottom: 1px solid var(--line)
+    }
+
+    .card .bd{
+        padding: var(--sp-4)
+    }
+
+    .note{
+        margin: 0;
+        padding: var(--sp-3) var(--sp-4);
+        border: 1px solid var(--brand-line);
+        border-radius: var(--r-md);
+        background: var(--brand-soft);
+        color: var(--brand-strong);
+        font-size: var(--fs-md);
+        line-height: var(--lh-base);
+        overflow-wrap: anywhere
+    }
+
+    .note.warn{
+        border-color: var(--warning-line);
+        background: var(--warning-soft);
+        color: var(--warning)
+    }
     </style>
 </head>
 <body>
-<main class="wrap">{% block content %}{{ body_html|raw }}{% endblock %}</main>
+<main class="wrap init-wrap">{% block content %}<div class="hero"><h1>初始化失败</h1><p>程序无法自动完成初始化。</p></div><div class="card"><div class="bd"><div class="note warn">{{ message }}</div></div></div>{% endblock %}</main>
 </body>
 </html>

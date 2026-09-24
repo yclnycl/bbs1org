@@ -1,20 +1,22 @@
 {% extends 'layout.html.twig' %}
+{% import 'macros/ui.html.twig' as ui %}
+{% import 'macros/form.html.twig' as f %}
 {% block content %}
     <div class="home-shell"><div class="forum-layout forum-layout-has-sidebar">
         <div class="forum-main"><div class="main-panel">
-            {{ auth_tabs_html('register') }}
+            {{ ui.tabs(auth_tabs, 'register', 'auth-tabs') }}
             <div class="form-panel auth-panel">
                 <h2>注册</h2>
                 <form method="post">
-                    {{ form_token() }}
-                    <label class="grid"><span>用户名<small>长度由后台设置控制，不能包含空白字符</small></span><input name="username" type="text"{{ username_attributes|raw }} pattern="\S+" title="用户名不能包含空白字符" required></label>
-                    {{ input('密码', 'password', '', 'password', true) }}
-                    {{ input('确认密码', 'password2', '', 'password', true) }}
-                    {{ input('邮箱', 'email', '', 'email') }}
+                    {{ f.token() }}
+                    <label class="grid"><span>用户名<small>长度由后台设置控制，不能包含空白字符</small></span><input name="username" type="text"{{ f.length_attrs('username')|raw }} pattern="\S+" title="用户名不能包含空白字符" required></label>
+                    {{ f.input('密码', 'password', '', 'password', true) }}
+                    {{ f.input('确认密码', 'password2', '', 'password', true) }}
+                    {{ f.input('邮箱', 'email', '', 'email') }}
                     <button>注册</button>
                 </form>
             </div>
         </div></div>
-        {{ sidebar|raw }}
+        <aside class="sidebar">{{ ui.notice_card(notice_title, notice_items) }}</aside>
     </div></div>
 {% endblock %}

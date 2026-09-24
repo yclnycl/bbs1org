@@ -1,15 +1,16 @@
 {% extends 'admin/layout.html.twig' %}
+{% import 'macros/form.html.twig' as f %}
 {% block admin_body %}
     <table class="list admin-bulk-list">
         <tr><th>名称</th><th>用户和内容管理</th><th>后台管理</th><th><a class="admin-head-add" href="{{ admin_url({do: 'edit', type: 'group', id: 0}) }}">添加</a></th></tr>
         {% for group in groups %}
             <tr>
                 <td><strong class="admin-name">{{ group.name }}</strong></td>
-                <td>{{ group.flag_manage|raw }}</td>
-                <td>{{ group.flag_admin|raw }}</td>
+                <td><span class="admin-flag{{ group.allow_manage|default(0) == 1 ? ' on' : '' }}">{{ group.allow_manage|default(0) == 1 ? '是' : '否' }}</span></td>
+                <td><span class="admin-flag{{ group.allow_admin|default(0) == 1 ? ' on' : '' }}">{{ group.allow_admin|default(0) == 1 ? '是' : '否' }}</span></td>
                 <td class="ops">
                     <a href="{{ admin_url({do: 'edit', type: 'group', id: group.id}) }}">编辑</a>
-                    {{ post_action_form(admin_url({do: 'delete'}), '删除', {type: 'groups', id: group.id, tab: 'groups'}, 'danger', '确定删除？') }}
+                    {{ f.action_form(admin_url({do: 'delete'}), '删除', {type: 'groups', id: group.id, tab: 'groups'}, 'danger', '确定删除？') }}
                 </td>
             </tr>
         {% endfor %}

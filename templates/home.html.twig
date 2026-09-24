@@ -1,9 +1,10 @@
 {% extends 'layout.html.twig' %}
+{% import 'macros/ui.html.twig' as ui %}
 {% block content %}
-    <div class="home-shell{{ shell_class ? ' ' ~ shell_class : '' }}"><div class="{{ sidebar != '' ? 'forum-layout forum-layout-has-sidebar' : 'forum-layout' }}">
+    <div class="home-shell{{ shell_class ? ' ' ~ shell_class : '' }}"><div class="forum-layout forum-layout-has-sidebar">
         <div class="forum-main"><div class="main-panel">
             {% if profile_uid %}
-                <div class="profile-toolbar">{{ tab_bar_html(profile_tabs, profile_tab) }}</div>
+                <div class="profile-toolbar">{{ ui.tabs(profile_tabs, profile_tab) }}</div>
             {% else %}
                 {% if q == '' %}
                     <div class="mobile-forum-strip">
@@ -14,7 +15,7 @@
                     </div>
                 {% endif %}
                 <div class="topic-toolbar">
-                    {{ tab_bar_html(tab_items, sort) }}
+                    {{ ui.tabs(tab_items, sort) }}
                     {% if can_speak() %}<a class="tab-post" href="{{ route_url('topic_edit', fid ? {fid: fid} : {}) }}">+ 发帖</a>{% endif %}
                 </div>
             {% endif %}
@@ -25,19 +26,19 @@
                     {% else %}
                         {% for n in notification_rows %}
                             {% if n.divider %}<li class="notification-read-divider">下面的通知已读</li>{% endif %}
-                            {{ notification_row_html(n.row) }}
+                            {{ ui.notification_row(n.row) }}
                         {% endfor %}
                     {% endif %}
                 {% elseif not rows %}
                     <li class="empty-state">{{ empty_text }}</li>
                 {% else %}
                     {% for t in list_rows %}
-                        {{ topic_list_row(t, sort) }}
+                        {{ ui.topic_list_row(t, sort) }}
                     {% endfor %}
                 {% endif %}
             </ul>
-            {% if pagination != '' %}<div class="pagination-bar">{{ pagination|raw }}</div>{% endif %}
+            {% if pagination %}<div class="pagination-bar">{{ pagination.kind == 'simple' ? ui.simple_pagination(pagination.has_prev, pagination.has_next, pagination.page, pagination.url, pagination.limited) : ui.pagination(pagination.total, pagination.page, pagination.size, pagination.url, pagination.limited) }}</div>{% endif %}
         </div></div>
-        {{ sidebar|raw }}
+        <aside class="sidebar">{{ ui.user_card(sidebar_user, false, fid) }}</aside>
     </div></div>
 {% endblock %}

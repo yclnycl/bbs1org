@@ -1,0 +1,74 @@
+{#
+    表单控件。控件标记集中在这里，PHP 只准备字段数据与取值。
+    用法：{% import 'macros/form.html.twig' as f %}
+#}
+
+{% macro caption(label, help) %}<span>{{ label }}{% if help|default('') != '' %}<small>{{ help }}</small>{% endif %}</span>{% endmacro %}
+
+{% macro length_attrs(name) %}
+{%- set limits = length_limits(name) -%}
+{%- if limits[0] is not null and limits[0] > 0 %} minlength="{{ limits[0] }}"{% endif -%}
+{%- if limits[1] is not null %} maxlength="{{ limits[1] }}"{% endif -%}
+{%- endmacro %}
+
+{% macro token() %}<input type="hidden" name="_csrf" value="{{ csrf_token() }}">{% endmacro %}
+
+{% macro hidden(fields) %}
+{%- for name, value in fields %}{% if value is not null %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor -%}
+{% endmacro %}
+
+{% macro input(label, name, value, type, required, help, class) %}
+<label class="grid{{ class|default('') != '' ? ' ' ~ class : '' }}">{{ _self.caption(label, help|default('')) }}<input name="{{ name }}" type="{{ type|default('text') }}" value="{{ value }}"{{ _self.length_attrs(name)|raw }}{{ required ? ' required' : '' }}></label>
+{%- endmacro %}
+
+{% macro textarea(label, name, value, required, help, class) %}
+<label class="grid{{ class|default('') != '' ? ' ' ~ class : '' }}">{{ _self.caption(label, help|default('')) }}<textarea name="{{ name }}"{{ _self.length_attrs(name)|raw }}{{ required ? ' required' : '' }}>{{ value }}</textarea></label>
+{%- endmacro %}
+
+{% macro checkbox(label, name, checked, help, class) %}
+<label class="grid{{ class|default('') != '' ? ' ' ~ class : '' }}">{{ _self.caption(label, help|default('')) }}<input type="checkbox" name="{{ name }}" value="1"{{ checked ? ' checked' : '' }}></label>
+{%- endmacro %}
+
+{% macro number_input(label, name, value, min, max, required, help, class) %}
+{%- set req = required is null ? true : required -%}
+{%- set limits = (min is not null ? ' min="' ~ min|e ~ '"' : '') ~ (max is not null ? ' max="' ~ max|e ~ '"' : '') -%}
+<label class="grid{{ class|default('') != '' ? ' ' ~ class : '' }}">{{ _self.caption(label, help|default('')) }}<input name="{{ name }}" type="number" value="{{ value }}"{{ limits|raw }}{{ req ? ' required' : '' }}></label>
+{%- endmacro %}
+
+{% macro select_input(label, name, value, options, help, class) %}
+<label class="grid{{ class|default('') != '' ? ' ' ~ class : '' }}">{{ _self.caption(label, help|default('')) }}<select name="{{ name }}">{% for option_value, option_label in options %}<option value="{{ option_value }}"{{ (option_value ~ '') is same as (value ~ '') ? ' selected' : '' }}>{{ option_label }}</option>{% endfor %}</select></label>
+{%- endmacro %}
+
+{% macro forum_select(fid) %}
+{%- set options = post_forum_options() -%}
+{%- if fid <= 0 %}{% set fid = options|keys|first|default(0) %}{% endif -%}
+{{- _self.select_input('版块', 'forum_id', fid, options) -}}
+{%- endmacro %}
+
+{% macro action_form(action, label, fields, class, confirm) %}
+{%- set confirm_attr = confirm|default('') != '' ? ' data-confirm="' ~ confirm|e ~ '"' : '' -%}
+<form class="post-action-form" method="post" action="{{ action }}"{{ confirm_attr|raw }}>{{ _self.token() }}{{ _self.hidden(fields) }}<button type="submit"{{ (class|default('') != '' ? ' class="' ~ class|e ~ '"' : '')|raw }}>{{ label }}</button></form>
+{%- endmacro %}
+
+{# 后台设置页按字段描述渲染整组控件 #}
+{% macro render_fields(fields, values) %}
+{%- for name, field in fields -%}
+{%- set type = field.type|default('text') -%}
+{%- set label = field.label|default(name) -%}
+{%- set value = field.value is defined ? field.value : (values[name] is defined ? values[name] : '') -%}
+{%- set help = field.help|default('') -%}
+{%- set class = field.class|default('') -%}
+{%- if help != '' and ' settings-help-field ' not in (' ' ~ class ~ ' ') %}{% set class = (class ~ ' settings-help-field')|trim %}{% endif -%}
+{%- if type == 'checkbox' -%}
+{{- _self.checkbox(label, name, value > 0, help, class) -}}
+{%- elseif type == 'number' -%}
+{{- _self.number_input(label, name, value, field.min is defined ? field.min : null, field.max is defined ? field.max : null, field.required is defined ? field.required : true, help, class) -}}
+{%- elseif type == 'select' -%}
+{{- _self.select_input(label, name, value, field.options|default({}), help, class) -}}
+{%- elseif type == 'textarea' -%}
+{{- _self.textarea(label, name, value, field.required|default(false), help, class) -}}
+{%- else -%}
+{{- _self.input(label, name, value, type, field.required|default(false), help, class) -}}
+{%- endif -%}
+{%- endfor -%}
+{% endmacro %}

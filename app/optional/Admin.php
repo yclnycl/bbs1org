@@ -3,15 +3,15 @@ declare(strict_types=1);
 
 namespace app\optional;
 
+use app\optional\Model\Forum;
+use app\optional\Model\Group;
+use app\optional\Model\Reply;
+use app\optional\Model\Topic;
+
 if (!defined('APP_ROOT')) exit;
 
 final class Admin
 {
-    public static function flag(int $yes, bool $danger = false): string
-    {
-        return '<span class="admin-flag' . ($yes ? ($danger ? ' danger' : ' on') : '') . '">' . ($yes ? '是' : '否') . '</span>';
-    }
-
     public static function clear_opcache_cache(): bool
     {
         if (!function_exists('opcache_reset')) return false;
@@ -51,38 +51,27 @@ final class Admin
         if ($name === '') err('版块名不能为空');
         $description = post('description', DB_TEXT_MAX_LENGTH);
         $sort = (int)$_POST['sort'];
-        $permissions = [];
-        foreach (['allow_view_groups', 'allow_post_groups', 'allow_reply_groups'] as $field) $permissions[$field] = implode(',', array_values(array_unique(array_filter(array_map('intval', (array)($_POST[$field] ?? []))))));
-        id() ? q("UPDATE app_forums SET name=?,description=?,sort=?,allow_view_groups=?,allow_post_groups=?,allow_reply_groups=? WHERE id=?", [$name, $description, $sort, ...array_values($permissions), id()]) : q("INSERT INTO app_forums(name,description,sort,allow_view_groups,allow_post_groups,allow_reply_groups) VALUES(?,?,?,?,?,?)", [$name, $description, $sort, ...array_values($permissions)]);
+        $values = ['name' => $name, 'description' => $description, 'sort' => $sort];
+        foreach (['allow_view_groups', 'allow_post_groups', 'allow_reply_groups'] as $field) $values[$field] = implode(',', array_values(array_unique(array_filter(array_map('intval', (array)($_POST[$field] ?? []))))));
+        if (id()) Forum::whereKey(id())->update($values);
+        else Forum::create($values);
         forums_cache(true);
-    }
-
-    public static function forum_group_select_options(?array $forum = null, string $field = '', string $label = ''): string
-    {
-        $selected = [];
-        if ($forum && $field !== '') $selected = forum_group_ids($forum, $field);
-        $html = '<div class="grid"><span>' . h($label) . '</span><div class="forum-group-checks">';
-        foreach (groups_cache() as $group) {
-            $gid = (int)$group['id'];
-            $html .= '<label class="check"><input type="checkbox" name="' . h($field) . '[]" value="' . $gid . '"' . (in_array($gid, $selected, true) ? ' checked' : '') . '><span>' . h($group['name']) . '</span></label>';
-        }
-        return $html . '</div></div>';
     }
 
     public static function save_group(): void
     {
         $name = post('name', DB_STRING_MAX_LENGTH);
         if ($name === '') err('组名不能为空');
-        $allow_manage = isset($_POST['allow_manage']) ? 1 : 0;
-        $allow_admin = isset($_POST['allow_admin']) ? 1 : 0;
-        id() ? q("UPDATE app_groups SET name=?,allow_manage=?,allow_admin=? WHERE id=?", [$name, $allow_manage, $allow_admin, id()]) : q("INSERT INTO app_groups(name,allow_manage,allow_admin) VALUES(?,?,?)", [$name, $allow_manage, $allow_admin]);
+        $values = ['name' => $name, 'allow_manage' => isset($_POST['allow_manage']) ? 1 : 0, 'allow_admin' => isset($_POST['allow_admin']) ? 1 : 0];
+        if (id()) Group::whereKey(id())->update($values);
+        else Group::create($values);
         groups_cache(true);
     }
 
     public static function deletable_post_row(string $type, int $id): ?array
     {
-        if ($type === 'topics') return row('app_topics', 'id', $id);
-        if ($type === 'replies') return row('app_replies', 'id', $id);
+        if ($type === 'topics') return Topic::find($id)?->toArray();
+        if ($type === 'replies') return Reply::find($id)?->toArray();
         return null;
     }
 
@@ -135,20 +124,17 @@ final class Admin
             'pretty_url' => ['label' => '是否开启rewrite', 'type' => 'checkbox'], 'site_closed' => ['label' => '是否关闭站点进行维护', 'type' => 'checkbox'], 'debug_mode' => ['label' => 'Debug模式', 'type' => 'checkbox'],
             'allow_register' => ['label' => '是否允许注册', 'type' => 'checkbox'], 'default_group_id' => ['label' => '新用户默认用户组', 'type' => 'select', 'options' => array_column(groups_cache(), 'name', 'id')], 'post_interval_seconds' => ['label' => '发帖/回复间隔（秒）', 'type' => 'number', 'min' => 0, 'max' => 3600, 'help' => '发帖/回复间隔设置为 0 可关闭限制，默认 5 秒一次。'],
         ];
-        $tools = '<div class="settings-tool-card"><div><strong>清理OPcache</strong><span>刷新已编译脚本缓存，适合代码更新后手动触发。</span></div>' . post_action_form(admin_url(['tab' => 'settings']), '清理', ['clear_opcache' => '1'], 'settings-tool-action') . '</div>';
-        if ((string)($settings['debug_mode'] ?? '0') === '1') $tools .= '<div class="settings-tool-card"><div><strong>Debug日志</strong><span>' . h(DEBUG_LOG_FILE) . '</span></div><div class="settings-tool-actions">' . post_action_form(admin_url(['tab' => 'settings']), '清空', ['debug_log_action' => 'clear'], 'settings-tool-action', '确定清空Debug日志？') . '<a class="settings-tool-action" href="' . h(admin_url(['tab' => 'settings', 'debug_log' => 'view'])) . '" target="_blank">查看</a></div></div>';
-        return ['fields' => $fields, 'settings' => $settings, 'tools' => $tools];
+        return [
+            'fields' => $fields,
+            'settings' => $settings,
+            'debug_mode' => (string)($settings['debug_mode'] ?? '0') === '1',
+            'debug_log_file' => DEBUG_LOG_FILE,
+        ];
     }
 
     public static function groups_view(): array
     {
-        $groups = [];
-        foreach (groups_cache() as $group) {
-            $group['flag_manage'] = self::flag((int)($group['allow_manage'] ?? 0));
-            $group['flag_admin'] = self::flag((int)($group['allow_admin'] ?? 0));
-            $groups[] = $group;
-        }
-        return ['groups' => $groups];
+        return ['groups' => groups_cache()];
     }
 
     public static function forums_view(): array
@@ -183,10 +169,19 @@ final class Admin
         need_admin();
         $type = $_GET['type'] ?? $_POST['type'] ?? '';
         if (is_post_request()) { if ($type === 'group') self::save_group(); elseif ($type === 'forum') self::save_forum(); else err('参数错误'); go(admin_url(['tab' => $type . 's'])); }
-        if ($type === 'group') { $g = id() ? (group_by_id(id()) ?: err('用户组不存在')) : ['id' => 0, 'name' => '', 'allow_manage' => 0, 'allow_admin' => 0]; $tab = 'groups'; $body = input('名称', 'name', $g['name'], 'text', true) . checkbox('允许用户和内容管理', 'allow_manage', (bool)(int)($g['allow_manage'] ?? 0)) . checkbox('允许后台管理', 'allow_admin', (bool)(int)($g['allow_admin'] ?? 0)); }
-        elseif ($type === 'forum') { $f = id() ? forum_by_id(id()) : ['id' => 0, 'name' => '', 'description' => '', 'sort' => 0, 'allow_view_groups' => '', 'allow_post_groups' => '', 'allow_reply_groups' => '']; if (!$f) err('版块不存在'); $tab = 'forums'; $body = input('名称', 'name', $f['name'], 'text', true) . number_input('排序', 'sort', $f['sort']) . textarea('描述', 'description', $f['description']) . self::forum_group_select_options($f, 'allow_view_groups', '允许浏览用户组') . self::forum_group_select_options($f, 'allow_post_groups', '允许发帖用户组') . self::forum_group_select_options($f, 'allow_reply_groups', '允许回帖用户组'); }
-        else err('参数错误');
-        render_page('admin/edit.html.twig', ['tab' => $tab, 'type' => $type, 'edit_id' => id(), 'body' => $body], '编辑');
+        $view = ['type' => $type, 'edit_id' => id()];
+        if ($type === 'group') {
+            $view += ['tab' => 'groups', 'group' => id() ? (group_by_id(id()) ?: err('用户组不存在')) : ['id' => 0, 'name' => '', 'allow_manage' => 0, 'allow_admin' => 0]];
+        } elseif ($type === 'forum') {
+            $f = id() ? forum_by_id(id()) : ['id' => 0, 'name' => '', 'description' => '', 'sort' => 0, 'allow_view_groups' => '', 'allow_post_groups' => '', 'allow_reply_groups' => ''];
+            if (!$f) err('版块不存在');
+            $selected = [];
+            foreach (['allow_view_groups', 'allow_post_groups', 'allow_reply_groups'] as $field) $selected[$field] = forum_group_ids($f, $field);
+            $view += ['tab' => 'forums', 'forum' => $f, 'groups' => groups_cache(), 'forum_selected' => $selected];
+        } else {
+            err('参数错误');
+        }
+        render_page('admin/edit.html.twig', $view, '编辑');
     }
 
     public static function route(): void

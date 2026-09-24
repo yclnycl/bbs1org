@@ -33,6 +33,16 @@ const modal = document.getElementById("notify-modal");
 const modalBody = document.getElementById("notify-modal-body");
 const modalTitle = document.getElementById("notify-modal-title");
 let confirmResolve = null;
+let modalReturnFocus = null;
+const rememberModalFocus = () => {
+    if (!modal || !modal.hidden) return;
+    modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+};
+const restoreModalFocus = () => {
+    const target = modalReturnFocus;
+    modalReturnFocus = null;
+    if (target && target.isConnected) target.focus();
+};
 const closeModal = () => {
     if (confirmResolve) {
         const resolve = confirmResolve;
@@ -41,13 +51,40 @@ const closeModal = () => {
     }
     if (modal) modal.hidden = true;
     if (modalBody) modalBody.innerHTML = "";
+    restoreModalFocus();
 };
 const openModal = (title, html) => {
     if (!modal || !modalBody) return;
+    rememberModalFocus();
     if (modalTitle) modalTitle.textContent = title;
     modalBody.innerHTML = html;
     modal.hidden = false;
 };
+const modalFocusables = () => modal
+    ? Array.from(modal.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')).filter(el => el.offsetParent !== null)
+    : [];
+// 把 Tab 焦点锁在弹层内，键盘用户不会跑到背后的页面上
+document.addEventListener("keydown", e => {
+    if (!modal || modal.hidden) return;
+    if (e.key === "Escape") {
+        e.preventDefault();
+        closeModal();
+        return;
+    }
+    if (e.key !== "Tab") return;
+    const items = modalFocusables();
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey && (active === first || !modal.contains(active))) {
+        e.preventDefault();
+        last.focus();
+    } else if (!e.shiftKey && (active === last || !modal.contains(active))) {
+        e.preventDefault();
+        first.focus();
+    }
+});
 const mobileMenu = document.getElementById("mobile-menu");
 const mobileMenuOpen = document.querySelector("[data-mobile-menu-open]");
 const closeMobileMenu = () => {
@@ -105,13 +142,14 @@ document.addEventListener("click", e => {
     if (mobileMenu && !mobileMenu.hidden && target === mobileMenu) closeMobileMenu();
 });
 document.addEventListener("keydown", e => {
-    if (e.key === "Escape") closeMobileMenu();
+    if (e.key === "Escape" && (!modal || modal.hidden)) closeMobileMenu();
 });
 const finishConfirm = (ok) => {
     const resolve = confirmResolve;
     confirmResolve = null;
     if (modal) modal.hidden = true;
     if (modalBody) modalBody.innerHTML = "";
+    restoreModalFocus();
     if (resolve) resolve(ok);
 };
 const _openModalBox = (title, fallback, builderFn) => new Promise(resolve => {
@@ -121,6 +159,7 @@ const _openModalBox = (title, fallback, builderFn) => new Promise(resolve => {
         confirmResolve = null;
         previous(false);
     }
+    rememberModalFocus();
     confirmResolve = resolve;
     if (modalTitle) modalTitle.textContent = title;
     modalBody.innerHTML = "";
@@ -131,7 +170,7 @@ const _openModalBox = (title, fallback, builderFn) => new Promise(resolve => {
     cancel.textContent = "取消";
     const ok = document.createElement("button");
     ok.type = "button";
-    ok.className = "danger";
+    ok.className = "btn danger";
     const focusEl = builderFn(box, cancel, ok);
     modalBody.appendChild(box);
     modal.hidden = false;
@@ -249,6 +288,7 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 document.addEventListener("click", e => {
     if (e.target?.closest("[data-modal-close]")) closeModal();
+    if (modal && !modal.hidden && e.target === modal) closeModal();
 });
 document.addEventListener("click", async e => {
     const link = e.target.closest("a[data-confirm]");

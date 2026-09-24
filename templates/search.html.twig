@@ -1,13 +1,15 @@
 {% extends 'layout.html.twig' %}
+{% import 'macros/ui.html.twig' as ui %}
+{% import 'macros/form.html.twig' as f %}
 {% block content %}
     <div class="home-shell search-page"><div class="forum-layout">
         <div class="forum-main"><div class="main-panel">
             <div class="search-page-head">
                 <h2>搜索</h2>
                 <form class="search-page-form" method="post" action="{{ route_url('search') }}" data-no-ajax="1">
-                    {{ form_token() }}
+                    {{ f.token() }}
                     <div class="search-page-query">
-                        <input type="search" name="q" value="{{ query }}" placeholder="搜索关键词"{{ length_attributes|raw }} required autofocus>
+                        <input type="search" name="q" value="{{ query }}" placeholder="搜索关键词"{{ f.length_attrs('q')|raw }} required autofocus>
                         <button type="submit">搜索</button>
                     </div>
                     <div class="search-page-types" role="radiogroup" aria-label="搜索范围">
@@ -27,11 +29,11 @@
                         <li class="empty-state">没有找到匹配的{{ field == 'reply' ? '回帖' : '主题' }}</li>
                     {% else %}
                         {% for row in rows %}
-                            {{ topic_list_row(row, 'comment') }}
+                            {{ ui.topic_list_row(row, 'comment') }}
                         {% endfor %}
                     {% endif %}
                 </ul>
-                {{ pagination|raw }}
+                {{ ui.search_pagination(has_prev, has_next, page, query, field) }}
             {% endif %}
         </div></div>
     </div></div>

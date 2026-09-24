@@ -1,12 +1,24 @@
 {% extends 'admin/layout.html.twig' %}
+{% import 'macros/form.html.twig' as f %}
 {% block admin_body %}
     <div class="form-panel">
         <h2>编辑</h2>
         <form method="post">
-            {{ form_token() }}
+            {{ f.token() }}
             <input type="hidden" name="type" value="{{ type }}">
             <input type="hidden" name="id" value="{{ edit_id }}">
-            {{ body|raw }}
+            {% if type == 'group' %}
+                {{ f.input('名称', 'name', group.name|default(''), 'text', true) }}
+                {{ f.checkbox('允许用户和内容管理', 'allow_manage', group.allow_manage|default(0) > 0) }}
+                {{ f.checkbox('允许后台管理', 'allow_admin', group.allow_admin|default(0) > 0) }}
+            {% else %}
+                {{ f.input('名称', 'name', forum.name|default(''), 'text', true) }}
+                {{ f.number_input('排序', 'sort', forum.sort|default(0)) }}
+                {{ f.textarea('描述', 'description', forum.description|default('')) }}
+                {% for field, label in {allow_view_groups: '允许浏览用户组', allow_post_groups: '允许发帖用户组', allow_reply_groups: '允许回帖用户组'} %}
+                    <div class="grid"><span>{{ label }}</span><div class="forum-group-checks">{% for g in groups %}<label class="check"><input type="checkbox" name="{{ field }}[]" value="{{ g.id }}"{{ g.id in forum_selected[field] ? ' checked' : '' }}><span>{{ g.name }}</span></label>{% endfor %}</div></div>
+                {% endfor %}
+            {% endif %}
             <button>保存</button>
         </form>
     </div>

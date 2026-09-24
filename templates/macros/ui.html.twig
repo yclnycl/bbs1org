@@ -1,0 +1,224 @@
+{#
+    通用 UI 组件。页面标记集中在这里，PHP 只准备数据。
+    用法：{% import 'macros/ui.html.twig' as ui %}
+#}
+
+{% macro icon(name) %}
+{%- set paths = {
+    'user': '<circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/><path d="M4 21c1.8-4 4.5-6 8-6s6.2 2 8 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+    'id': '<rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="10" r="2" stroke="currentColor" stroke-width="1.8"/><path d="M5.5 15c.7-1.4 1.5-2 2.5-2s1.8.6 2.5 2M13 10h5M13 14h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
+    'reply': '<path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>',
+    'notify': '<path d="M12 18.5a2.5 2.5 0 0 0 2.4-1.8H9.6a2.5 2.5 0 0 0 2.4 1.8Zm7-4.5-1.6-1.9V10a5.4 5.4 0 0 0-4.4-5.3V4a1 1 0 1 0-2 0v.7A5.4 5.4 0 0 0 6.6 10v2.1L5 14v1h14z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
+    'forum': '<path d="M4 5h16v14H4z" stroke="currentColor" stroke-width="2"/><path d="M8 9h8M8 13h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+    'topic': '<path d="M5 4h14v16H5z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M8 8h8M8 12h8M8 16h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+    'view': '<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>',
+    'settings': '<path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+    'admin': '<path d="M12 3 4 6v6c0 5 3.4 7.8 8 9 4.6-1.2 8-4 8-9V6l-8-3Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 12l2 2 4-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+    'pages': '<path d="M8 4h9a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9.5 9h6M9.5 12.5h6M9.5 16h3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>'
+} -%}
+{%- if paths[name] is defined %}<svg class="meta-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">{{ paths[name]|raw }}</svg>{% endif -%}
+{% endmacro %}
+
+{% macro avatar(uid, name, class) %}
+{%- set classes = ('avatar-img ' ~ (class|default('')))|trim -%}
+<img class="{{ classes }}" src="{{ asset_url('app/assets/avatar.svg') }}" alt="{{ name }}" loading="lazy">
+{%- endmacro %}
+
+{% macro avatar_link(uid, name, class) %}
+{%- set classes = ('avatar-img ' ~ (class|default('')))|trim -%}
+{%- if uid < 1 -%}
+<img class="{{ classes }}" src="{{ asset_url('app/assets/avatar.svg') }}" alt="{{ name }}" loading="lazy">
+{%- else -%}
+<a class="avatar-profile-link" href="{{ route_url('user', {id: uid})|e }}" aria-label="查看 {{ name }} 的个人主页"><img class="{{ classes }}" src="{{ asset_url('app/assets/avatar.svg') }}" alt="{{ name }}" loading="lazy"></a>
+{%- endif -%}
+{% endmacro %}
+
+{% macro notify_badge(count) %}
+{%- if count > 0 %}<span class="notify-badge">{{ count }}</span>{% endif -%}
+{% endmacro %}
+
+{% macro state_tags(u) %}
+{%- if u.is_muted|default(0) == 1 -%}
+<span class="user-state-tags"><span class="user-state-tag danger">禁言</span></span>
+{%- endif -%}
+{% endmacro %}
+
+{% macro group_tag(row) %}
+{%- set gid = row.group_id|default(0) -%}
+{%- if gid > 0 and gid != setting('default_group_id', '2') -%}
+{%- set g = group_by_id(gid) -%}
+{%- if g %}<span class="post-user-group"><span class="post-user-group-icon" aria-hidden="true">{{ _self.icon('user') }}</span>{{ g.name }}</span>{% endif -%}
+{%- endif -%}
+{% endmacro %}
+
+{% macro stats(view_count, reply_count) %}
+{%- set stats = '' -%}
+{%- if view_count > 0 %}{% set stats = stats ~ '<span>' ~ _self.icon('view') ~ view_count ~ '</span>' %}{% endif -%}
+{%- if reply_count > 0 %}{% set stats = stats ~ '<span>' ~ _self.icon('reply') ~ reply_count ~ '</span>' %}{% endif -%}
+{%- if stats != '' %}<div class="post-content-stats">{{ stats|raw }}</div>{% endif -%}
+{% endmacro %}
+
+{% macro quote_action(row, floor) %}
+{%- set floor_attr = floor|default(0) > 0 ? ' data-floor="' ~ floor ~ '"' : '' -%}
+<a class="icon-action icon-quote quote-reply" href="#reply" data-username="{{ row.username }}"{{ floor_attr|raw }} title="回复"><span>回复</span></a>
+{%- endmacro %}
+
+{% macro tabs(items, active, class) %}
+{%- set cls = class|default('') -%}
+<div class="tab-bar{{ cls != '' ? ' ' ~ cls : '' }}">{% for key, item in items %}{% set label = item is iterable ? item.label|default('') : item %}{% set href = item is iterable ? item.href|default('#') : '#' %}{% set extra = item is iterable ? item.class|default('') : '' %}<a class="tab{{ active == key ? ' active' : '' }}{{ extra != '' ? ' ' ~ extra : '' }}" href="{{ href }}">{{ label }}</a>{% endfor %}</div>
+{%- endmacro %}
+
+{% macro notice_card(title, items) %}
+<div class="card sidebar-card quick-card"><div class="quick-wrap"><div class="quick-title">{{ title }}</div><ul class="quick-links notice-links">{% for item in items %}<li>{{ item }}</li>{% endfor %}</ul></div></div>
+{%- endmacro %}
+
+{% macro post_row(row, body, time, ops, title, view_count, reply_count, highlight, ctx) %}
+{%- set is_reply = row.topic_id is defined -%}
+{%- set topic_id = is_reply ? row.topic_id : row.id|default(0) -%}
+{%- set floor = is_reply ? ctx.reply_position|default(0) : 0 -%}
+{%- set has_title = title|default('') != '' -%}
+{%- set stats_html = _self.stats(view_count|default(0), reply_count|default(0)) -%}
+{%- set title_html = has_title ? '<div class="post-topic-title"><h1 class="post-content-title">' ~ title|e ~ '</h1>' ~ stats_html ~ '</div>' : '' -%}
+{%- set floor_attr = floor > 0 ? ' data-floor="' ~ floor ~ '"' : '' -%}
+{%- set floor_html = floor > 0 ? '<a class="post-floor" href="' ~ route_url('topic', {id: topic_id, floor: floor})|e ~ '">#' ~ floor ~ '</a>' : '' -%}
+{%- set ops = ops|default({}) -%}
+{%- set ops_inner = (ops.quote|default(false) ? _self.quote_action(row, floor) : '') ~ (ops.edit|default(false) ? _self.edit_link(ops.edit_url|default('')) : '') -%}
+{%- set ops_html = (ops_inner != '' or floor_html != '') ? '<div class="post-ops">' ~ ops_inner ~ floor_html ~ '</div>' : '' -%}
+{%- set uid_html = (row.user_id|default(0) > 0 and (row.username|default('')) != '匿名') ? '<span class="post-user-group user-uid-badge" title="用户 UID"><span class="user-uid-icon" aria-hidden="true">' ~ _self.icon('id') ~ '</span>' ~ row.user_id ~ '</span>' : '' -%}
+{%- set tags_html = _self.group_tag(row) ~ _self.state_tags(row) ~ uid_html -%}
+<li class="post-item post-entry{{ has_title ? ' has-title' : '' }}{{ highlight|default(false) ? ' post-highlight' : '' }}" id="post-{{ row.id|default(0) }}"{{ floor_attr|raw }}>{{ title_html|raw }}<div class="post-avatar">{{ _self.avatar_link(row.user_id, row.username)|raw }}</div><div class="post-body"><div class="post-head{{ floor > 0 ? ' has-floor' : '' }}"><div class="post-info"><a class="post-title post-author" href="{{ route_url('user', {id: row.user_id})|e }}">{{ row.username }}</a><span class="post-time">{{ human_time(time) }}</span></div>{{ ops_html|raw }}</div><div class="post-meta">{{ tags_html|raw }}</div></div><div class="post-content">{{ body|markdown(topic_id) }}</div></li>
+{%- endmacro %}
+
+{% macro edit_link(url) %}
+<a class="icon-action icon-edit" href="{{ url }}" title="编辑"><span>编辑</span></a>
+{%- endmacro %}
+
+{% macro topic_list_row(t, sort) %}
+{%- set time = t.time|default(sort == 'post' ? t.created_at : (t.last_reply_at ?: t.created_at)) -%}
+{%- if t.reply_only|default(0) -%}
+{%- set reply_excerpt = (t.my_reply_excerpt|default(''))|trim -%}
+{%- set reply_excerpt_html = reply_excerpt != '' ? '<div class="profile-reply-excerpt">' ~ reply_excerpt|e ~ '</div>' : '' -%}
+{%- set user_link = '<a href="' ~ route_url('user', {id: t.user_id})|e ~ '">' ~ _self.icon('user') ~ t.username|e ~ '</a>' -%}
+<li class="post-item"><div class="post-avatar">{{ _self.avatar_link(t.user_id, t.username)|raw }}</div><div class="post-body">{{ reply_excerpt_html|raw }}<div class="post-meta"><span>{{ user_link|raw }}</span><span>{{ human_time(time) }}</span></div></div></li>
+{%- else -%}
+{%- set forum = t.forum|default({id: t.forum_id, name: ''}) -%}
+{%- set has_forum = forum.id|default(0) > 0 and (forum.name|default(''))|trim != '' -%}
+{%- set user_link = '<a href="' ~ route_url('user', {id: t.user_id})|e ~ '">' ~ _self.icon('user') ~ t.username|e ~ '</a>' -%}
+{%- set forum_link = has_forum ? '<a href="' ~ route_url('forum', {id: forum.id})|e ~ '">' ~ forum.name|e ~ '</a>' : '' -%}
+{%- set last_reply_username = t.last_reply_username|default('') -%}
+{%- set last_reply_user = last_reply_username != '' ? '<span>' ~ _self.icon('user') ~ last_reply_username|e ~ '</span>' : '' -%}
+{%- set time_meta = '<span>' ~ human_time(time) ~ '</span>' -%}
+{%- set forum_meta = has_forum ? '<span class="post-forum-meta">' ~ _self.icon('forum') ~ forum_link ~ '</span>' : '' -%}
+{%- set meta = '<span>' ~ user_link ~ '</span>' ~ (sort == 'post' ? time_meta : '') ~ forum_meta ~ '<span>' ~ _self.icon('reply') ~ t.reply_count ~ '</span>' ~ last_reply_user ~ (sort == 'post' ? '' : time_meta) -%}
+{%- set pages = _self.topic_pages(t.id, t.reply_count) -%}
+{%- set reply_id = t.my_reply_id|default(0) -%}
+{%- set topic_url = route_url('topic', {id: t.id, replyid: reply_id > 0 ? reply_id : null}) -%}
+{%- set reply_excerpt = (t.my_reply_excerpt|default(''))|trim -%}
+{%- set reply_excerpt_html = reply_excerpt != '' ? '<div class="profile-reply-excerpt">' ~ reply_excerpt|e ~ '</div>' : '' -%}
+{%- set badges = t.is_pinned|default(0) ? '<span class="topic-badge pinned">置顶</span>' : '' -%}
+{%- set style = (t.highlight_style|default('')) != '' ? ' style="' ~ t.highlight_style|e ~ '"' : '' -%}
+{%- set forum_badge = has_forum ? '<a class="post-tag post-forum-badge" href="' ~ route_url('forum', {id: forum.id})|e ~ '">' ~ forum.name|e ~ '</a>' : '' -%}
+<li class="post-item{{ t.is_pinned|default(0) ? ' topic-pinned' : '' }}"><div class="post-avatar">{{ _self.avatar_link(t.user_id, t.username)|raw }}</div><div class="post-body"><div class="post-title-row">{{ badges|raw }}<a class="post-title" href="{{ topic_url }}"{{ style|raw }}>{{ t.title }}</a>{{ pages|raw }}</div>{{ reply_excerpt_html|raw }}<div class="post-meta">{{ meta|raw }}</div></div>{{ forum_badge|raw }}</li>
+{%- endif -%}
+{% endmacro %}
+
+{% macro notification_row(n) %}
+{%- set sender_id = n.sender_id|default(0) -%}
+{%- set sender_name = (n.sender_username|default(''))|trim ?: '系统' -%}
+{%- set kind = n.kind|default('') == 'mention' ? '提及' : '通知' -%}
+{%- set unread = n.read_at|default(0) == 0 -%}
+{%- set sender_title = sender_id > 0 ? '<a class="post-title" href="' ~ route_url('user', {id: sender_id})|e ~ '">' ~ sender_name|e ~ '</a>' : '<span class="post-title">' ~ sender_name|e ~ '</span>' -%}
+<li class="post-item notification-item{{ unread ? ' unread' : '' }}"><div class="post-avatar">{{ _self.avatar_link(sender_id ?: 0, sender_name)|raw }}</div><div class="post-body"><div class="post-title-row notification-head">{{ sender_title|raw }}<span class="post-user-group notification-kind">{{ kind }}</span>{% if unread %}<span class="notification-unread">未读</span>{% endif %}</div><div class="post-meta"><span>{{ human_time(n.created_at) }}</span></div><div class="post-content notification-content">{{ n|notification_content }}</div></div></li>
+{%- endmacro %}
+
+{% macro pagination(total, page, size, url, limited) %}
+{%- set lim = limited is null ? true : limited -%}
+{%- set pages = max(1, (total / size)|round(0, 'ceil')) -%}
+{%- if lim %}{% set pages = min(pages, max_pagination_pages()) %}{% endif -%}
+{%- if pages > 1 -%}
+{%- set page = max(1, min(page, pages)) -%}
+{%- set start = max(1, page - 2) -%}
+{%- set end = min(pages, page + 2) -%}
+{%- set h = '<div class="pagination"><ul>' -%}
+{%- if page > 1 %}{% set h = h ~ '<li><a href="' ~ append_url_query(url, {p: page - 1})|e ~ '">上一页</a></li>' %}{% endif -%}
+{%- if start > 1 -%}
+{%- set h = h ~ '<li><a href="' ~ append_url_query(url, {p: 1})|e ~ '">1</a></li>' -%}
+{%- if start > 2 %}{% set h = h ~ '<li><span class="ellipsis">...</span></li>' %}{% endif -%}
+{%- endif -%}
+{%- for i in start..end -%}
+{%- set h = h ~ '<li' ~ (i == page ? ' class="active"' : '') ~ '><a href="' ~ append_url_query(url, {p: i})|e ~ '">' ~ i ~ '</a></li>' -%}
+{%- endfor -%}
+{%- if end < pages -%}
+{%- if end < pages - 1 %}{% set h = h ~ '<li><span class="ellipsis">...</span></li>' %}{% endif -%}
+{%- set h = h ~ '<li><a href="' ~ append_url_query(url, {p: pages})|e ~ '">' ~ pages ~ '</a></li>' -%}
+{%- endif -%}
+{%- if page < pages %}{% set h = h ~ '<li><a href="' ~ append_url_query(url, {p: page + 1})|e ~ '">下一页</a></li>' %}{% endif -%}
+{{- (h ~ '</ul></div>')|raw -}}
+{%- endif -%}
+{% endmacro %}
+
+{% macro simple_pagination(has_prev, has_next, page, url, limited) %}
+{%- set lim = limited is null ? true : limited -%}
+{%- set next = (lim and page >= max_pagination_pages()) ? false : has_next -%}
+{%- if has_prev or next -%}
+{%- set h = '<div class="pagination"><ul>' -%}
+{%- if has_prev %}{% set h = h ~ '<li><a href="' ~ append_url_query(url, {p: max(1, page - 1)})|e ~ '">上一页</a></li>' %}{% endif -%}
+{%- set h = h ~ '<li class="active"><a href="' ~ append_url_query(url, {p: page})|e ~ '">' ~ page ~ '</a></li>' -%}
+{%- if next %}{% set h = h ~ '<li><a href="' ~ append_url_query(url, {p: page + 1})|e ~ '">下一页</a></li>' %}{% endif -%}
+{{- (h ~ '</ul></div>')|raw -}}
+{%- endif -%}
+{% endmacro %}
+
+{% macro topic_pages(topic_id, reply_count) %}
+{%- set size = max(1, setting('replies_per_page', '50')) -%}
+{%- set pages = (reply_count / size)|round(0, 'ceil') -%}
+{%- if pages > 1 -%}
+{%- set nums = [] -%}
+{%- for n in [2, 3, pages - 2, pages - 1, pages] -%}
+{%- if n >= 2 and n <= pages and n not in nums %}{% set nums = nums|merge([n]) %}{% endif -%}
+{%- endfor -%}
+{%- set nums = nums|sort -%}
+{%- set h = '<span class="topic-pages">' ~ _self.icon('pages') -%}
+{%- set prev = 1 -%}
+{%- for i in nums -%}
+{%- if i - prev > 1 %}{% set h = h ~ '<span class="topic-pages-sep">…</span>' %}{% endif -%}
+{%- set h = h ~ '<a href="' ~ route_url('topic', {id: topic_id, p: i})|e ~ '">' ~ i ~ '</a>' -%}
+{%- set prev = i -%}
+{%- endfor -%}
+{{- (h ~ '</span>')|raw -}}
+{%- endif -%}
+{% endmacro %}
+
+{% macro user_card(m, reply_button, fid) %}
+{%- set m = m ?: me() -%}
+{%- if not m -%}
+<div class="card sidebar-card user-card"><div class="user-wrap"><div class="user-header"><div class="user-header-info"><div class="user-avatar-big visitor-avatar">P</div><div><div class="user-name">访客</div><div class="user-rank">请登录后发帖</div></div></div></div><div class="side-auth{{ setting('allow_register', '1') == '1' ? '' : ' single' }}"><a href="{{ route_url('login') }}">登录</a>{% if setting('allow_register', '1') == '1' %}<a href="{{ route_url('register') }}">注册</a>{% endif %}</div></div></div>
+{%- else -%}
+{%- set is_self = uid() and m.id == uid() -%}
+{%- set prefix = is_self ? '我的' : 'TA的' -%}
+{%- set unread = is_self ? m.unread_notifications|default(0) : 0 -%}
+{# 头像、图标与 URL 都先转义好再拼接，和原来 h() 的行为一致 #}
+{%- set avatar_html = _self.avatar(m.id, m.username, '') -%}
+{%- set links = '<a href="' ~ route_url('user', {id: m.id, tab: 'topics'})|e ~ '">' ~ _self.icon('topic') ~ prefix ~ '主题</a>'
+    ~ '<a href="' ~ route_url('user', {id: m.id, tab: 'replies'})|e ~ '">' ~ _self.icon('reply') ~ prefix ~ '回帖</a>' -%}
+{%- if is_self -%}
+{%- set links = links
+    ~ '<a href="' ~ route_url('user', {id: m.id, tab: 'notifications'})|e ~ '">' ~ _self.icon('notify') ~ prefix ~ '通知' ~ _self.notify_badge(unread) ~ '</a>'
+    ~ '<a href="' ~ route_url('profile')|e ~ '">' ~ _self.icon('settings') ~ '个人设置</a>'
+    ~ (can_access_admin() ? '<a href="' ~ route_url('admin')|e ~ '">' ~ _self.icon('admin') ~ '后台面板</a>' : '') -%}
+{%- endif -%}
+{%- set user_url = route_url('user', {id: m.id}) -%}
+<div class="card sidebar-card user-card"><div class="user-wrap"><div class="user-header"><div class="user-header-info"><a class="user-avatar-big" href="{{ user_url|raw }}">{{ avatar_html|raw }}</a><div><a class="user-name" href="{{ user_url|raw }}">{{ m.username }}</a><div class="user-rank">{{ m.group_name|default('用户') }}{{ _self.state_tags(m) }}</div></div></div></div><div class="user-links" >{{ links|raw }}</div></div>{% if can_speak() and (is_self or reply_button) %}<a class="btn-post" href="{{ reply_button ? '#reply' : route_url('topic_edit', {fid: fid ?: null})|e }}">{{ reply_button ? '回帖' : '+ 发帖' }}</a>{% endif %}</div>
+{%- endif -%}
+{% endmacro %}
+
+{% macro search_page_button(target, label, query, field) %}
+<form method="post" action="{{ route_url('search') }}" data-no-ajax="1"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ query }}"><input type="hidden" name="field" value="{{ field }}"><input type="hidden" name="p" value="{{ target }}"><button type="submit">{{ label }}</button></form>
+{%- endmacro %}
+
+{% macro search_pagination(has_prev, has_next, page, query, field) %}
+{%- set next = (page >= max_pagination_pages()) ? false : has_next -%}
+{%- if has_prev or next -%}
+<div class="pagination-bar search-page-pagination"><div class="pagination"><ul>{% if has_prev %}<li>{{ _self.search_page_button(max(1, page - 1), '上一页', query, field) }}</li>{% endif %}<li class="active"><span>{{ page }}</span></li>{% if next %}<li>{{ _self.search_page_button(page + 1, '下一页', query, field) }}</li>{% endif %}</ul></div></div>
+{%- endif -%}
+{% endmacro %}

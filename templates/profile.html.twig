@@ -1,8 +1,10 @@
 {% extends 'layout.html.twig' %}
+{% import 'macros/ui.html.twig' as ui %}
+{% import 'macros/form.html.twig' as f %}
 {% block content %}
     <div class="home-shell"><div class="forum-layout forum-layout-has-sidebar">
         <div class="forum-main"><div class="main-panel">
-            <div class="profile-toolbar">{{ tab_bar_html(profile_tabs, profile_tab) }}</div>
+            <div class="profile-toolbar">{{ ui.tabs(profile_tabs, profile_tab) }}</div>
             {% if profile_tab == 'profile' %}
                 <div class="form-panel">
                     <div class="profile-account-grid">
@@ -12,14 +14,14 @@
                         <div class="profile-account-card"><span>注册时间</span><strong>{{ registered_at }}</strong></div>
                         <div class="profile-account-card profile-account-logout">
                             <form class="post-action-form" method="post" action="{{ route_url('logout') }}">
-                                {{ form_token() }}
+                                {{ f.token() }}
                                 <button class="profile-exit-button" type="submit"><span>账号安全</span><strong>安全退出</strong></button>
                             </form>
                         </div>
                     </div>
                     <form method="post">
-                        {{ form_token() }}
-                        {{ textarea('简介', 'bio', u.bio) }}
+                        {{ f.token() }}
+                        {{ f.textarea('简介', 'bio', u.bio) }}
                         <div class="grid profile-disclosure" data-profile-disclosure>
                             <div>
                                 <div class="profile-disclosure-summary">
@@ -27,8 +29,8 @@
                                     <button class="profile-edit-action" type="button" data-profile-toggle aria-expanded="false">修改</button>
                                 </div>
                                 <div class="profile-disclosure-detail is-hidden" data-profile-edit>
-                                    {{ input('新密码', 'password', '', 'password') }}
-                                    {{ input('确认密码', 'password2', '', 'password') }}
+                                    {{ f.input('新密码', 'password', '', 'password') }}
+                                    {{ f.input('确认密码', 'password2', '', 'password') }}
                                 </div>
                             </div>
                         </div>
@@ -37,6 +39,7 @@
                 </div>
             {% endif %}
         </div></div>
-        {{ sidebar_stack_html([sidebar_user_card_html(u, true)]) }}
+        {# 本页没有 #reply 锚点，回帖按钮会失效；改为指向发帖 #}
+        <aside class="sidebar">{{ ui.user_card(u, false) }}</aside>
     </div></div>
 {% endblock %}

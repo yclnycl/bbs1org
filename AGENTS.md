@@ -55,7 +55,8 @@ SQLite 库文件在 Docker 卷的 `app/data/`（不入库）；卷内 `app/data/
 6. **Markdown 渲染只有一条路径**：`Markdown::html()`，模板里用 `{{ body|markdown(topic_id) }}`（楼层提及生成 `/topic/{id}?floor=n` 链接需要 topic id）。编辑器预览 POST `/preview` 调的是同一个函数——不要另写渲染逻辑，保证预览与发布后一致。
 7. **改 `app/assets/` 下的文件要顺手把 `app/version.php` 的版本号 +1**：页面里静态资源带 `?v=`，nginx 缓存 1 小时，不改版本号用户可能长期拿到旧 JS/CSS。
 8. **新增敏感目录要同步 Web 拦截规则**：`docker/nginx.conf` 与 README 里的 Apache `.htaccess` 段一起改。当前被拦：`app/{data,cache,plugins,optional}`、`app/**/*.php`、`vendor`、`templates`、`docs`。
-9. **注释、commit message、文档都写中文**；commit 用 Conventional Commits 风格（`feat:` / `fix:` / `refactor:` / `style:` / `chore:` + 中文描述）。
+9. **密钥（密码、API key、token、证书私钥）一律不写入代码、模板、文档或 commit**。运行时通过 Docker 环境变量注入容器：真实值只写在 `docker/.env`（已 gitignore），`.env.example` 只放非敏感占位。新增凭据的做法：compose 里补环境变量映射 → `.env.example` 加空占位（默认值留空）→ 代码里 `getenv()` 读取，留空时由程序生成随机值并落到数据卷（现有先例：`ADMIN_PASSWORD` 留空时随机生成，写入卷内 `app/data/admin-password.txt`）。数据库配置的 `app/data/db.php` 同理属于数据卷而非代码库。
+10. **注释、commit message、文档都写中文**；commit 用 Conventional Commits 风格（`feat:` / `fix:` / `refactor:` / `style:` / `chore:` + 中文描述）。
 
 ## 开发
 

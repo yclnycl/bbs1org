@@ -2,7 +2,7 @@
 {% import 'macros/ui.html.twig' as ui %}
 {% import 'macros/form.html.twig' as f %}
 {% block head %}<link rel="stylesheet" href="{{ app_url('app/assets/vendor/easymde/easymde.min.css') }}?v={{ app_version }}">{% endblock %}
-{% block scripts %}<script src="{{ app_url('app/assets/vendor/easymde/easymde.min.js') }}?v={{ app_version }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ app_url('app/assets/vendor/easymde/easymde.min.js') }}?v={{ app_version }}" defer></script>{{ f.turnstile_script() }}{% endblock %}
 {% block content %}
     <div class="home-shell"><div class="forum-layout forum-layout-has-sidebar">
         <div class="forum-main"><div class="main-panel">
@@ -14,6 +14,7 @@
                     <input type="hidden" name="topic_id" value="{{ r.topic_id }}">
                     {{ f.markdown_editor('内容', 'body', r.body, true) }}
                     {%- if r.id > 0 %}<label class="grid reply-action-field"><span>操作</span><select name="do" data-reply-actions aria-label="回复操作"><option value="">不操作</option><option value="delete" data-confirm="确定删除该回复？">删除</option>{% if can_manage() %}<option value="mute_author" data-confirm="确定禁言该作者？">禁言作者</option>{% endif %}</select></label>{% endif %}
+                    {{ f.turnstile('reply') }}
                     <button type="submit" data-loading-text="正在保存">保存</button>
                 </form>
             </div>

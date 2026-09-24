@@ -11,6 +11,7 @@
                     {{ f.token() }}
                     {{ f.input('用户名', 'username', '', 'text', true) }}
                     {{ f.input('密码', 'password', '', 'password', true) }}
+                    {{ f.turnstile('login') }}
                     <button>登录</button>
                 </form>
             </div>
@@ -18,3 +19,4 @@
         <aside class="sidebar">{{ ui.notice_card(notice_title, notice_items) }}</aside>
     </div></div>
 {% endblock %}
+{% block scripts %}{{ f.turnstile_script() }}{% endblock %}

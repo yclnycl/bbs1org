@@ -28,6 +28,12 @@ x-php: &php
     ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
     ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
     ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    # Cloudflare Turnstile 人机验证（登录/注册/发主题/回帖）。
+    # 三个变量必须同时有值才启用，任一留空即整体关闭：页面不输出组件、后端也不校验。
+    # TURNSTILE_HOSTNAMES 只写本站自己的域名，绝不写 localhost/127.0.0.1（线上会被伪造）。
+    TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+    TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
+    TURNSTILE_HOSTNAMES: ${TURNSTILE_HOSTNAMES:-}
   volumes:
     - ${BBS1ORG_PATH:-..}:/var/www/html:rw
     - data:/var/www/html/app/data

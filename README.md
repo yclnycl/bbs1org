@@ -156,6 +156,33 @@ RewriteRule ^ index.php [L,QSA]
 
 `{{ body|markdown(topic_id) }}` 过滤器是正文渲染入口；模板里第二个参数是主题 id，楼层提及要它才能生成 `/topic/{id}?floor={n}` 链接。
 
+## 人机验证（Cloudflare Turnstile）
+
+登录、注册、发主题、回帖四个入口接入了 Cloudflare Turnstile。前端只负责拿 token，判定一律在后端：
+
+- 前端：`templates/macros/form.html.twig` 的 `f.turnstile(action)` 输出组件容器，`f.turnstile_script()` 按页面引入 `api.js`。组件放在 `<form>` 内，Turnstile 会往容器里插入 `cf-turnstile-response` 隐藏域随表单提交；由 `app/assets/index.js` 显式渲染（`api.js?render=explicit`），并保留 widget id —— token 是一次性的，每次提交后按 id 重置，否则同一页面的第二次提交必然失败
+- 后端：`index.php` 的 `turnstile_verify($action)` 在受保护的处理逻辑之前调用，与 `check()` 里的 CSRF 校验同一层。它要求 siteverify 返回 `success === true`，且 `action` 与页面一致、`hostname` 命中白名单；任何一项不通过都返回 403（表单走消息页、AJAX 走 JSON），受保护的处理逻辑不会执行。判定失败的原因会写进 `app/data/debug.log`（`reason=action:...`、`reason=hostname:...`、`reason=siteverify:invalid-input-secret` 等）
+- 只在需要的页面加载：不含上述表单的页面不引入 `api.js`，也不输出组件
+
+三个环境变量**同时有值**才启用；任一留空即整体关闭（页面不输出组件、后端也不校验），未配置的环境与接入前完全一致：
+
+| 变量 | 说明 |
+| --- | --- |
+| `TURNSTILE_SITE_KEY` | 组件 site key，公开值，会渲染进页面 |
+| `TURNSTILE_SECRET` | 后端 secret，只用于调 siteverify |
+| `TURNSTILE_HOSTNAMES` | siteverify 返回的 `hostname` 白名单，逗号分隔 |
+
+```bash
+# docker/.env
+TURNSTILE_SITE_KEY=0x4AAAAAAFCcUMBGK8Qf0NC7
+TURNSTILE_SECRET=<密钥>
+TURNSTILE_HOSTNAMES=localhost,127.0.0.1     # 线上填 cncttc.com,www.cncttc.com
+```
+
+- 只配一半是危险状态（以为开着其实没开），程序会往调试日志写一条提醒
+- 白名单只写本站自己的域名。线上那份**不能**包含 `localhost` / `127.0.0.1`，否则别的机器可以拿本地的 token 来通过校验
+- 想本地联调就用同一对 site key / secret：把 `localhost`、`127.0.0.1` 加进 Cloudflare 上该组件的域名列表即可。Cloudflare 的测试 site key（`1x00000000000000000000AA` 等）产生的固定 token 不带 `action`，过不了 `action` 校验，只适合验证组件渲染
+
 ## 数据层
 
 数据访问统一通过 Eloquent 完成，业务代码里不再有手写 SQL：

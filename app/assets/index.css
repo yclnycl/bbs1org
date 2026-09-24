@@ -1705,6 +1705,16 @@ a:focus-visible,
     margin: 0
 }
 
+/* 人机验证组件（Cloudflare Turnstile）：只在接入时出现，占一行并与上下字段留出间距。
+   组件加载前 :empty 占位，避免表单按钮在组件出现时跳动。 */
+.turnstile-field{
+    margin: var(--sp-2) 0
+}
+
+.turnstile-field:empty{
+    min-height: 65px
+}
+
 .reply-panel .grid>span{
     display: none
 }

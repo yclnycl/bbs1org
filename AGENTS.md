@@ -32,7 +32,7 @@ cp .env.example .env        # 首次：站点名、管理员账号、端口
 
 | 位置 | 职责 |
 | --- | --- |
-| `index.php` | 单一入口：autoloader、公共函数库、路由分发（`core_routes()`）、各页面函数（`*_page` / `*_route`）、`render_page()`/`twig()` 渲染出口 |
+| `index.php` | 单一入口：autoloader、公共函数库、路由分发（`core_routes()`）、各页面函数（`*_page` / `*_route`）、`render_page()`/`twig()` 渲染出口；人机验证的 `turnstile_verify()` 也在这里 |
 | `app/optional/Bootstrap.php` | 首次访问自动初始化；`schema()` 是唯一的建表建索引来源 |
 | `app/optional/Admin.php` | 后台路由 `Admin::route()`（`/admin?tab=…`） |
 | `app/optional/Markdown.php` | 正文渲染唯一入口 `Markdown::html()` |
@@ -57,6 +57,7 @@ SQLite 库文件在 Docker 卷的 `app/data/`（不入库）；卷内 `app/data/
 8. **新增敏感目录要同步 Web 拦截规则**：`docker/nginx.conf` 与 README 里的 Apache `.htaccess` 段一起改。当前被拦：`app/{data,cache,plugins,optional}`、`app/**/*.php`、`vendor`、`templates`、`docs`。
 9. **密钥（密码、API key、token、证书私钥）一律不写入代码、模板、文档或 commit**。运行时通过 Docker 环境变量注入容器：真实值只写在 `docker/.env`（已 gitignore），`.env.example` 只放非敏感占位。新增凭据的做法：compose 里补环境变量映射 → `.env.example` 加空占位（默认值留空）→ 代码里 `getenv()` 读取，留空时由程序生成随机值并落到数据卷（现有先例：`ADMIN_PASSWORD` 留空时随机生成，写入卷内 `app/data/admin-password.txt`）。数据库配置的 `app/data/db.php` 同理属于数据卷而非代码库。
 10. **注释、commit message、文档都写中文**；commit 用 Conventional Commits 风格（`feat:` / `fix:` / `refactor:` / `style:` / `chore:` + 中文描述）。
+11. **受保护的 POST 入口要先过 `turnstile_verify($action)`**：登录 / 注册 / 发主题 / 回帖四处已接，action 与模板里 `f.turnstile(action)` 传的值一一对应（1-32 位字母/数字/下划线/连字符）。它的三个环境变量（`TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` / `TURNSTILE_HOSTNAMES`）任一留空即整体关闭，细节见 [README.md](README.md)「人机验证」。新增受保护表单要同时做三件事：模板加 `{{ f.turnstile('action') }}` 与 `{{ f.turnstile_script() }}`、处理逻辑开头调用 `turnstile_verify('action')`、确认 `TURNSTILE_HOSTNAMES` 覆盖该部署的域名。
 
 ## 开发
 

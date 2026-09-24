@@ -320,6 +320,48 @@ document.addEventListener("click", e => {
     textarea.focus();
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
 });
+/* --- 人机验证：Cloudflare Turnstile。显式渲染并记下 widget id，提交后按 id 重置 --- */
+/* token 是一次性的：同一页面第二次提交前必须 reset，否则后端拿到的是已消费的 token。 */
+const turnstileFields = () => Array.from(document.querySelectorAll("[data-turnstile]"));
+const renderTurnstile = () => {
+    if (!window.turnstile || typeof window.turnstile.render !== "function") return false;
+    turnstileFields().forEach(field => {
+        if (field.dataset.turnstileWidgetId) return;
+        try {
+            const widgetId = window.turnstile.render(field, {
+                sitekey: field.dataset.sitekey,
+                action: field.dataset.action || undefined,
+                language: field.dataset.language || undefined,
+            });
+            if (widgetId) field.dataset.turnstileWidgetId = widgetId;
+        } catch (_) {
+            /* 单个组件渲染失败不能影响本页其它脚本 */
+        }
+    });
+    return true;
+};
+const resetTurnstile = form => {
+    if (!window.turnstile || typeof window.turnstile.reset !== "function") return;
+    const field = (form || document).querySelector("[data-turnstile]");
+    const widgetId = field?.dataset?.turnstileWidgetId;
+    if (!widgetId) return;
+    try {
+        window.turnstile.reset(widgetId);
+    } catch (_) {}
+};
+const initTurnstile = () => {
+    if (!turnstileFields().length) return;
+    /* 不用 turnstile.ready()：api.js 带 async/defer 时它会直接抛错，而这段代码一旦抛出，
+       后面的提交拦截就注册不上。api.js 的落地时机不定，所以轮询等 render 就绪，超时放弃
+       （没有 token 的提交后端会拒）。 */
+    renderTurnstile();
+    let attempts = 0;
+    const timer = setInterval(() => {
+        if (renderTurnstile() || ++attempts > 100) clearInterval(timer);
+    }, 150);
+};
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initTurnstile);
+else initTurnstile();
 document.addEventListener("submit", async e => {
     if (e.defaultPrevented) return;
     const promptField = e.submitter?.dataset?.promptField || e.target?.dataset?.promptField || "";
@@ -394,6 +436,7 @@ document.addEventListener("submit", async e => {
             showToast(message);
         } finally {
             delete replyForm.dataset.submitting;
+            resetTurnstile(replyForm);
             if (button) {
                 button.disabled = false;
                 button.removeAttribute("aria-busy");
@@ -462,6 +505,7 @@ document.addEventListener("submit", async e => {
                 if (panel) replaceEl.outerHTML = panel.outerHTML;
             } catch (_) {}
             if (!replaceEl || replaceEl.isConnected) resetButton();
+            resetTurnstile(form);
             showToast(successMessage);
             return;
         }
@@ -479,6 +523,7 @@ document.addEventListener("submit", async e => {
         if (data.redirect) setTimeout(() => { window.location.href = data.redirect; }, 800);
     } catch (err) {
         showToast(err?.message || "操作失败");
+        resetTurnstile(form);
         resetButton();
     }
 });

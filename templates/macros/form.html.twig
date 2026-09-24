@@ -13,6 +13,18 @@
 
 {% macro token() %}<input type="hidden" name="_csrf" value="{{ csrf_token() }}">{% endmacro %}
 
+{#
+    人机验证：Cloudflare Turnstile。未接入（环境变量不齐）时两个宏都输出空，页面与未接入时完全一致。
+    - turnstile(action) 放在 <form> 内：Turnstile 会往容器里插入 cf-turnstile-response 隐藏域随表单提交；
+      action 取值与后端 turnstile_verify() 的入参一一对应（1-32 位字母/数字/下划线/连字符）。
+    - turnstile_script() 放在页面的 scripts 块里；组件由前端 index.js 显式渲染（api.js?render=explicit），
+      容器故意不带 cf-turnstile 类：带类会在 api.js 隐式渲染时重复渲染一次。
+      显式渲染才能拿到 widget id，提交后按 id 重置——token 是一次性的，不重置第二次提交必然失败。
+#}
+{% macro turnstile(action) %}{% if turnstile_enabled() %}<div class="turnstile-field" data-turnstile data-sitekey="{{ turnstile_site_key() }}" data-action="{{ action }}" data-language="zh-cn"></div>{% endif %}{% endmacro %}
+
+{% macro turnstile_script() %}{% if turnstile_enabled() %}<script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>{% endif %}{% endmacro %}
+
 {% macro hidden(fields) %}
 {%- for name, value in fields %}{% if value is not null %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor -%}
 {% endmacro %}

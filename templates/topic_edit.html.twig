@@ -2,7 +2,7 @@
 {% import 'macros/ui.html.twig' as ui %}
 {% import 'macros/form.html.twig' as f %}
 {% block head %}<link rel="stylesheet" href="{{ app_url('app/assets/vendor/easymde/easymde.min.css') }}?v={{ app_version }}">{% endblock %}
-{% block scripts %}<script src="{{ app_url('app/assets/vendor/easymde/easymde.min.js') }}?v={{ app_version }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ app_url('app/assets/vendor/easymde/easymde.min.js') }}?v={{ app_version }}" defer></script>{{ f.turnstile_script() }}{% endblock %}
 {% block content %}
     <div class="home-shell"><div class="forum-layout forum-layout-has-sidebar">
         <div class="forum-main"><div class="main-panel">
@@ -16,6 +16,7 @@
                     {{ f.markdown_editor('内容', 'body', t.body, true) }}
                     {%- if editing %}{{ f.select_input('回帖排序', 'reply_order', (t.reply_order|default(0)) ~ '', {'0': '发帖时间顺序', '1': '发帖时间倒序'}) }}{% endif %}
                     {%- if edit_ops %}<label class="grid topic-action-field"><span>操作</span><select name="topic_action" data-topic-action><option value="">不操作</option><option value="delete_topic">删除主题及回帖</option><option value="pin">置顶</option><option value="highlight">高亮</option><option value="bold">加粗</option><option value="mute_author">禁言作者</option></select></label><label class="grid topic-secondary-field is-hidden" data-topic-action-secondary="pin"><span>置顶</span><select name="topic_pin_action"><option value="pin"{{ edit_ops.is_pinned ? '' : ' selected' }}>置顶</option><option value="unpin"{{ edit_ops.is_pinned ? ' selected' : '' }}>取消置顶</option></select></label><label class="grid topic-highlight-field is-hidden" data-topic-action-secondary="highlight" data-topic-highlight-wrap><span>颜色</span><input type="hidden" name="highlight_style" value="{{ edit_ops.style }}" data-topic-highlight-value><div class="topic-color-swatches">{% for color in ['#c0392b', '#b45309', '#15803d', '#1d4ed8', '#6d28d9'] %}<button class="topic-color-swatch{{ edit_ops.style == color ? ' active' : '' }}" type="button" data-topic-color="{{ color }}" style="background:{{ color }}" aria-label="{{ color }}"></button>{% endfor %}<button class="topic-color-swatch topic-color-clear{{ edit_ops.style == '' ? ' active' : '' }}" type="button" data-topic-color="" aria-label="取消高亮"></button></div></label><label class="grid topic-secondary-field is-hidden" data-topic-action-secondary="bold"><span>加粗</span><select name="topic_bold_action"><option value="bold"{{ edit_ops.is_bold ? '' : ' selected' }}>加粗</option><option value="unbold"{{ edit_ops.is_bold ? ' selected' : '' }}>取消加粗</option></select></label>{% endif %}
+                    {{ f.turnstile('topic') }}
                     <div class="topic-form-actions"><button type="submit" data-loading-text="{{ loading_text }}">保存</button></div>
                 </form>
             </div>

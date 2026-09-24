@@ -13,6 +13,7 @@
                     {{ f.input('密码', 'password', '', 'password', true) }}
                     {{ f.input('确认密码', 'password2', '', 'password', true) }}
                     {{ f.input('邮箱', 'email', '', 'email') }}
+                    {{ f.turnstile('register') }}
                     <button>注册</button>
                 </form>
             </div>
@@ -20,3 +21,4 @@
         <aside class="sidebar">{{ ui.notice_card(notice_title, notice_items) }}</aside>
     </div></div>
 {% endblock %}
+{% block scripts %}{{ f.turnstile_script() }}{% endblock %}

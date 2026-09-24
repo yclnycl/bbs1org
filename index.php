@@ -649,6 +649,112 @@ function check(): void
         err('请求已过期');
     }
 }
+/*
+ * Cloudflare Turnstile 人机验证。
+ *
+ * 三个环境变量一起决定是否启用，缺一个都视为未接入：页面不输出组件，后端也不校验。
+ *   TURNSTILE_SITE_KEY   前端 site key（公开值，会渲染进页面）
+ *   TURNSTILE_SECRET     后端 secret（只经 siteverify 使用，不落任何输出）
+ *   TURNSTILE_HOSTNAMES  siteverify 返回的 hostname 白名单，逗号分隔
+ * 只配一半是危险状态（以为开着其实没开），所以单独记一条调试日志。
+ */
+function turnstile_site_key(): string
+{
+    return trim((string)getenv('TURNSTILE_SITE_KEY'));
+}
+function turnstile_secret(): string
+{
+    return trim((string)getenv('TURNSTILE_SECRET'));
+}
+function turnstile_enabled(): bool
+{
+    static $warned = false;
+    $site_key = turnstile_site_key();
+    $secret = turnstile_secret();
+    if ($site_key !== '' && $secret !== '') return true;
+    // 只配一半（页面会渲染组件但后端不校验，反之亦然）是危险状态，记一条日志；
+    // 一次请求里只会命中一次，避免每个宏/函数各写一遍
+    if (!$warned && ($site_key !== '' || $secret !== '')) {
+        $warned = true;
+        debug_log_write('Turnstile 配置不完整：TURNSTILE_SITE_KEY / TURNSTILE_SECRET / TURNSTILE_HOSTNAMES 必须同时设置，当前按未接入处理');
+    }
+    return false;
+}
+function turnstile_hostnames(): array
+{
+    $hostnames = [];
+    foreach (explode(',', (string)getenv('TURNSTILE_HOSTNAMES')) as $hostname) {
+        $hostname = strtolower(trim($hostname));
+        if ($hostname !== '') $hostnames[] = $hostname;
+    }
+    return $hostnames;
+}
+/** 调 siteverify 校验 token。拿不到确定结果时返回 null，由调用方按不通过处理 */
+function turnstile_siteverify(string $secret, string $token): ?array
+{
+    $fields = ['secret' => $secret, 'response' => $token];
+    $ip = ip_addr();
+    if ($ip !== '' && $ip !== '0.0.0.0') $fields['remoteip'] = $ip;
+    $url = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+    $body = http_build_query($fields);
+    $raw = null;
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $body,
+            CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded'],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT => 10,
+        ]);
+        $raw = curl_exec($ch);
+        if ($raw === false || (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE) !== 200) $raw = null;
+        curl_close($ch);
+    } else {
+        $context = stream_context_create(['http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: application/x-www-form-urlencoded\r\n",
+            'content' => $body,
+            'timeout' => 10,
+            'ignore_errors' => true,
+        ]]);
+        $raw = @file_get_contents($url, false, $context);
+        if (!is_string($raw) || $raw === '') $raw = null;
+    }
+    if (!is_string($raw)) return null;
+    $result = json_decode($raw, true);
+    return is_array($result) ? $result : null;
+}
+/** 校验本次 POST 的 cf-turnstile-response；不通过就地报错，受保护的处理逻辑不会执行 */
+function turnstile_verify(string $action): void
+{
+    if (!turnstile_enabled()) return;
+    $secret = turnstile_secret();
+    $hostnames = turnstile_hostnames();
+    $token = trim((string)($_POST['cf-turnstile-response'] ?? ''));
+    // 配置缺项、token 缺失或超长一律拒绝：宁可拦错也不放过
+    if ($secret === '' || $hostnames === []) turnstile_reject($action, 'config');
+    if ($token === '' || strlen($token) > 2048) turnstile_reject($action, 'token:' . strlen($token));
+    $result = turnstile_siteverify($secret, $token);
+    if ($result === null) turnstile_reject($action, 'siteverify-unreachable');
+    // 逐项判定，失败原因写调试日志：error-codes 里的 invalid-input-secret 等能直接定位问题
+    if (($result['success'] ?? false) !== true) {
+        turnstile_reject($action, 'siteverify:' . implode(',', (array)($result['error-codes'] ?? [])));
+    }
+    if ((string)($result['action'] ?? '') !== $action) {
+        turnstile_reject($action, 'action:' . (string)($result['action'] ?? ''));
+    }
+    if (!in_array(strtolower((string)($result['hostname'] ?? '')), $hostnames, true)) {
+        turnstile_reject($action, 'hostname:' . (string)($result['hostname'] ?? ''));
+    }
+}
+function turnstile_reject(string $action, string $reason): never
+{
+    debug_log_write('Turnstile 校验未通过 action=' . $action . ' reason=' . $reason);
+    // 403 是给调用方的判定结果；消息页/JSON 沿用 err() 既有的两条出口
+    err('人机验证未通过，请重试', 403, ajax_request() ? 'ajax' : 'page');
+}
 function ajax_request(): bool
 {
     return ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest';
@@ -946,7 +1052,7 @@ function twig(bool $cache = true): Twig\Environment
     ]);
     // 模板里只保留「取数据」的函数，页面标记一律由 templates/macros 下的宏负责
     foreach (['route_url', 'admin_url', 'asset_url', 'app_url', 'human_time', 'flash_json'] as $fn) $env->addFunction(new Twig\TwigFunction($fn, $fn, ['is_safe' => ['html']]));
-    foreach (['setting', 'csrf_token', 'uid', 'me', 'group_by_id', 'can_manage', 'can_speak', 'can_access_admin', 'is_super_user', 'can_manage_topic', 'can_manage_reply', 'notification_excerpt', 'excerpt_length', 'notification_link', 'length_limits', 'max_pagination_pages', 'append_url_query', 'post_forum_options', 'admin_tabs'] as $fn) $env->addFunction(new Twig\TwigFunction($fn, $fn));
+    foreach (['setting', 'csrf_token', 'uid', 'me', 'group_by_id', 'can_manage', 'can_speak', 'can_access_admin', 'is_super_user', 'can_manage_topic', 'can_manage_reply', 'notification_excerpt', 'excerpt_length', 'notification_link', 'length_limits', 'max_pagination_pages', 'append_url_query', 'post_forum_options', 'admin_tabs', 'turnstile_enabled', 'turnstile_site_key'] as $fn) $env->addFunction(new Twig\TwigFunction($fn, $fn));
     // 正文是富文本渲染（Markdown 子集 + 提及/楼层链接），属于文本转换而非页面结构，保留为过滤器
     $env->addFilter(new Twig\TwigFilter('markdown', markdown_html(...), ['is_safe' => ['html']]));
     $env->addFilter(new Twig\TwigFilter('notification_content', notification_content_html(...), ['is_safe' => ['html']]));
@@ -1405,6 +1511,7 @@ function login_page(): void
 {
     if (uid()) go(consume_auth_return_url());
     if (is_post_request()) {
+        turnstile_verify('login');
         $u = User::where('username', post('username', DB_STRING_MAX_LENGTH))->first(['id', 'password']);
         if ($u && password_verify((string)$_POST['password'], (string)$u->password)) {
             complete_login((int)$u->id);
@@ -1423,6 +1530,7 @@ function register_page(): void
     if (uid()) go(consume_auth_return_url());
     if (setting('allow_register', '1') !== '1') err('注册已关闭');
     if (is_post_request()) {
+        turnstile_verify('register');
         if (array_key_exists('id', $_GET) || array_key_exists('id', $_POST)) err('参数错误');
         save_user();
         $user_id = (int)($GLOBALS['__last_saved_user_id'] ?? 0);
@@ -1739,6 +1847,8 @@ function topic_page(): void
 function topic_edit_page(): void
 {
     need_speak();
+    // 本页 POST 既可能发主题也可能删/置顶/高亮，一律先过人机验证再读库
+    if (is_post_request()) turnstile_verify('topic');
     $topic_id = id();
     $editing = $topic_id > 0;
     $t = ['id' => 0, 'forum_id' => id('fid') ?: default_post_forum_id(), 'title' => '', 'body' => '', 'user_id' => uid()];
@@ -1767,6 +1877,8 @@ function topic_edit_page(): void
 function reply_edit_page(): void
 {
     need_speak();
+    // 编辑页上挂着删除/禁言等操作，整页 POST 一律先过人机验证
+    if (is_post_request()) turnstile_verify('reply');
     $reply_id = id();
     $editing = $reply_id > 0;
     $r = ['id' => 0, 'topic_id' => id('topic_id'), 'body' => '', 'user_id' => uid()];

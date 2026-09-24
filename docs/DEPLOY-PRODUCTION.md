@@ -118,6 +118,21 @@ cd bbs1org/docker
 ./env-check.sh              # 现在应当是「一致」
 ```
 
+### 人机验证（Turnstile）
+
+登录 / 注册 / 发主题 / 回帖由 Cloudflare Turnstile 保护，三个变量在**线上那份** `bbs1org_docker/.env` 里配齐才启用（本地那份在仓库的 `docker/.env`）：
+
+```bash
+TURNSTILE_SITE_KEY=0x4AAAAAAFCcUMBGK8Qf0NC7
+TURNSTILE_SECRET=<密钥>
+TURNSTILE_HOSTNAMES=cncttc.com,www.cncttc.com
+```
+
+- 线上白名单**不要**写 `localhost` / `127.0.0.1`：那等于允许别人拿本地签发、hostname 为 localhost 的 token 通过校验
+- `.env` 不在 bind mount 里，改完要 `docker compose up -d --force-recreate php` 才能让新变量进容器
+- 这三个变量只进容器，不在 `env-check.sh` 的比对项里，两边不一致它发现不了——改完自己确认一次
+- 排障：站点设置里打开 Debug 模式，看 `app/data/debug.log` 的 `reason=`：`siteverify:invalid-input-secret` 是 secret 不对或没进容器；`hostname:xxx` 是访问域名与白名单不符（改白名单，或在 Cloudflare 上把域名加进该组件）；`action:xxx` 是页面表单与后端 `turnstile_verify()` 的取值对不上
+
 ### 回滚
 
 ```bash

@@ -12,10 +12,10 @@
 </head>
 <body>
 {% include 'nav.html.twig' with {nav: nav} only %}
-<main class="wrap" data-slot="page.before_render">
+<main class="wrap">
     {% block content %}{% endblock %}
 </main>
-<footer class="footer" data-slot="page.footer"></footer>
+<footer class="footer"></footer>
 <div class="modal-backdrop" id="notify-modal" hidden>
     <div class="modal-panel">
         <div class="modal-head"><strong id="notify-modal-title">提示</strong><button type="button" class="modal-close" data-modal-close aria-label="关闭">×</button></div>

@@ -1,13 +1,13 @@
 # bbs1org
 
-一个极简 PHP 论坛。核心逻辑集中在单个 PHP 文件中，页面渲染使用 Twig 模板（templates/ 目录），使用 SQLite 单文件数据库。适合社区站点、低成本部署和 AI 二次开发。
+一个极简 PHP 论坛。核心逻辑集中在单个 PHP 文件中，页面渲染使用 Twig 模板（templates/ 目录），使用 SQLite 单文件数据库。适合社区站点、低成本部署和二次开发。
 
 ## 特点
 
 - 页面渲染基于 Twig 3 模板（templates/ 目录，自动转义、模板缓存），路由函数只负责准备数据
 - 使用 SQLite 单文件数据库，零外部依赖，备份即复制文件
-- 包含首页、版块、主题、回帖、收藏、个人主页和后台管理等完整论坛功能
-- 支持用户组、版块权限、站点设置、注册控制、发帖限制和附件管理
+- 包含首页、版块、主题、回帖、通知、个人主页和后台管理等完整论坛功能
+- 支持用户组、版块权限、站点设置、注册控制、发帖限制
 - 无安装向导，首次访问按环境变量自动初始化，适配 Docker 一键部署
 - 站点设置、版块和用户组按需懒加载，数据库结构简单，负载能力强
 - 支持 AJAX 交互和响应式布局，兼顾 PC 与移动端使用体验
@@ -26,14 +26,6 @@
 
 使用 Docker 部署还需要 Docker Engine 24 及以上和 Docker Compose v2。Docker 镜像基于 PHP fpm-alpine 和 Nginx Alpine；源码运行时以 PHP `8.1+` 为最低要求。
 
-## 演示
-
-https://bbs1.org
-
-## 代码仓库
-
-https://github.com/bbs1git/bbs1org
-
 ## Docker 部署（推荐）
 
 服务器需先安装 Docker Engine 24+ 和 Docker Compose v2。Docker 可使用以下命令安装：
@@ -48,7 +40,7 @@ sudo sh install-docker.sh
 ```bash
 cd docker
 cp .env.example .env
-# 按需编辑 .env：站点名、管理员账号、端口、数据库
+# 按需编辑 .env：站点名、管理员账号、端口
 docker compose up -d
 ```
 
@@ -58,7 +50,7 @@ docker compose up -d
 http://服务器地址:8080
 ```
 
-无需安装向导：首次访问时程序会按环境变量自动完成初始化（建表、默认版块、管理员账号），数据保存在 `forum_data` 等数据卷中。管理员密码来自 `.env` 中的 `ADMIN_PASSWORD`；留空时自动生成随机密码，保存在数据卷 `app/data/admin-password.txt` 并打印到容器日志（`docker compose logs forum`）。
+无需安装向导：首次访问时程序会按环境变量自动完成初始化（建表、默认版块、管理员账号），数据保存在 `forum_data` 数据卷中。管理员密码来自 `.env` 中的 `ADMIN_PASSWORD`；留空时自动生成随机密码，保存在数据卷 `app/data/admin-password.txt` 并打印到容器日志（`docker compose logs forum`）。
 
 数据库固定使用 `SQLite`，数据文件保存在 `forum_data` 数据卷中。
 
@@ -123,8 +115,7 @@ RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.php [L,QSA]
 ```
 
-- 打开 [源码下载](https://bbs1.org/plugin_market_source)，下载 `bbs1org.zip`；或直接 `git clone` 本仓库。
-- 解压后将目录内全部文件上传到网站目录，确保 `index.php` 位于网站根目录。
+- 下载源码后解压，将目录内全部文件上传到网站目录，确保 `index.php` 位于网站根目录。
 - 按上面的环境变量表设置 PHP 进程的环境变量（不设置则使用 SQLite 与默认管理员账号，随机密码见 `app/data/admin-password.txt`）。
 - 访问站点域名，首次访问自动完成初始化。
 
@@ -132,12 +123,6 @@ RewriteRule ^ index.php [L,QSA]
 
 宝塔和 1Panel 可在面板终端执行“Docker 部署”中的克隆、配置和启动命令。
 
-## 数据库转换和迁移
-
-站点初始化后，管理员访问 `index.php?a=migrate` 进入“数据迁入”，填写旧 SQLite 数据库文件路径即可迁入；当前库没有的表会自动复制字段、主键和索引后再导入数据，同名表则清空后替换，并保留原 ID。
-
-附件、头像文件不在数据库中，需要另外复制 `app/upload/` 和 `app/avatars/`。迁移前请备份新旧数据库。
-
 ## 数据备份
 
-SQLite数据目录 `app/data/` 和附件目录 `app/upload/` 需要定期备份。
+SQLite 数据目录 `app/data/` 需要定期备份。

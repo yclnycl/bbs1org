@@ -1,8 +1,8 @@
 #!/bin/sh
 set -e
 
-mkdir -p /app/app/data /app/app/upload /app/app/avatars /run/nginx
-chown -R www-data:www-data /app/app/data /app/app/upload /app/app/avatars
+mkdir -p /app/app/data /run/nginx
+chown -R www-data:www-data /app/app/data
 
 php-fpm -D
 

@@ -11,17 +11,13 @@ require __DIR__ . '/vendor/autoload.php';
 ini_set('display_errors', '0');
 error_reporting(E_ALL & ~E_NOTICE & ~E_WARNING);
 date_default_timezone_set('Asia/Shanghai');
-define('APP_START_TIME', microtime(true));
 require __DIR__ . '/app/version.php';
 define('APP_ROOT', __DIR__);
 define('APP_DIR', APP_ROOT . '/app');
-define('ASSET_DIR', APP_DIR . '/assets');
 define('DATA_DIR', APP_DIR . '/data');
 define('TEMPLATE_DIR', APP_ROOT . '/templates');
 define('DB_CONFIG_FILE', DATA_DIR . '/db.php');
 define('INSTALL_LOCK_FILE', DATA_DIR . '/install.lock');
-define('AVATAR_DIR', APP_DIR . '/avatars');
-define('UPLOAD_DIR', APP_DIR . '/upload');
 define('DEBUG_LOG_FILE', DATA_DIR . '/debug.log');
 define('DEBUG_LOG_DEDUP_SECONDS', 600);
 define('PASSWORD_MIN_LENGTH', 4);
@@ -31,7 +27,6 @@ define('COOKIE_TTL', 15552000);
 define('AUTH_COOKIE_NAME', 'bbs_auth');
 define('AUTH_COOKIE_TTL', COOKIE_TTL);
 define('CSRF_COOKIE_NAME', 'bbs_csrf');
-define('APP_PROJECT_URL', 'https://bbs1.org');
 spl_autoload_register(static function (string $class_name): void {
     $class_file = APP_ROOT . '/' . str_replace('\\', '/', $class_name) . '.php';
     if (is_file($class_file)) require_once $class_file;
@@ -78,12 +73,6 @@ function app_db_types(): array
         'text' => 'TEXT',
     ];
 }
-function app_db_columns(PDO $db, string $table): array
-{
-    $columns = [];
-    foreach ($db->query('PRAGMA table_info(' . $table . ')')->fetchAll() as $row) $columns[(string)($row['name'] ?? '')] = true;
-    return $columns;
-}
 function app_db_table_exists(PDO $db, string $table): bool
 {
     $stmt = $db->prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?");
@@ -104,65 +93,9 @@ function app_db_upsert_sql(string $table, array $columns, array $keys): string
     if (!$updates) return $base . ' ON CONFLICT(' . implode(',', $keys) . ') DO NOTHING';
     return $base . ' ON CONFLICT(' . implode(',', $keys) . ') DO UPDATE SET ' . implode(',', array_map(fn($c) => $c . '=excluded.' . $c, $updates));
 }
-function app_db_write(string $table, array $data, array $keys, bool $ignore = false): void
-{
-    if (!$data || !$keys) throw new InvalidArgumentException('数据库写入参数不能为空。');
-    $columns = array_keys($data);
-    if ($ignore) {
-        $marks = sql_marks(count($columns));
-        $sql = 'INSERT INTO ' . app_db_identifier($table) . '(' . implode(',', $columns) . ') VALUES(' . $marks . ') ON CONFLICT(' . implode(',', $keys) . ') DO NOTHING';
-    } else $sql = app_db_upsert_sql($table, $columns, $keys);
-    db()->prepare($sql)->execute(array_values($data));
-    db_row_cache_clear();
-}
-function app_db_upsert(string $table, array $data, array $keys): void
-{
-    app_db_write($table, $data, $keys);
-}
-function app_db_insert_ignore(string $table, array $data, array $keys): void
-{
-    app_db_write($table, $data, $keys, true);
-}
-function app_db_create_index(string $name, string $target): void
-{
-    $table = trim((string)strstr($target, '(', true));
-    if (app_db_index_exists(db(), $name, $table)) return;
-    db()->exec('CREATE INDEX ' . app_db_identifier($name) . ' ON ' . $target);
-}
-function app_db_drop_index(string $name, string $table): void
-{
-    if (!app_db_index_exists(db(), $name, $table)) return;
-    db()->exec('DROP INDEX ' . app_db_identifier($name));
-}
-function app_db_create_table(string $table, string $definition): void
-{
-    db()->exec('CREATE TABLE IF NOT EXISTS ' . app_db_identifier($table) . '(' . $definition . ')');
-}
-function app_db_drop_table(string $table): void
-{
-    db()->exec('DROP TABLE IF EXISTS ' . app_db_identifier($table));
-}
-function app_db_ensure_columns(string $table, array $definitions): void
-{
-    $columns = app_db_columns(db(), $table);
-    foreach ($definitions as $name => $definition) {
-        if (isset($columns[$name])) continue;
-        db()->exec('ALTER TABLE ' . app_db_identifier($table) . ' ADD COLUMN ' . app_db_identifier($name) . ' ' . $definition);
-    }
-}
-function app_db_drop_column(string $table, string $column): void
-{
-    $db = db();
-    if (!isset(app_db_columns($db, $table)[$column])) return;
-    $db->exec('ALTER TABLE ' . app_db_identifier($table) . ' DROP COLUMN ' . app_db_identifier($column));
-}
 function app_db_last_insert_id(string $table): int
 {
     return (int)db()->lastInsertId();
-}
-function app_db_greatest(string ...$expressions): string
-{
-    return 'MAX(' . implode(',', $expressions) . ')';
 }
 function db_config(): array
 {
@@ -296,11 +229,11 @@ function rows_by_ids(string $table, array $ids, string $cols = '*'): array
 }
 function user_summary_defaults(string $username = ''): array
 {
-    return ['username' => $username, 'avatar_style' => '', 'avatar_seed' => '', 'group_id' => 0, 'points' => 0, 'is_banned' => 0, 'is_muted' => 0];
+    return ['username' => $username, 'group_id' => 0, 'is_muted' => 0];
 }
 function attach_users(array $rows, string $key = 'user_id', string $fallback = '用户删除'): array
 {
-    $users = rows_by_ids('app_users', array_column($rows, $key), 'id,username,avatar_style,avatar_seed,group_id,points,is_banned,is_muted');
+    $users = rows_by_ids('app_users', array_column($rows, $key), 'id,username,group_id,is_muted');
     foreach ($rows as &$row) $row += ($users[(int)($row[$key] ?? 0)] ?? user_summary_defaults($fallback));
     unset($row);
     return $rows;
@@ -308,7 +241,7 @@ function attach_users(array $rows, string $key = 'user_id', string $fallback = '
 function attach_topic_list_users(array $rows): array
 {
     $user_ids = array_merge(array_column($rows, 'user_id'), array_column($rows, 'last_reply_user_id'));
-    $users = rows_by_ids('app_users', $user_ids, 'id,username,avatar_style,avatar_seed,group_id,points,is_banned,is_muted');
+    $users = rows_by_ids('app_users', $user_ids, 'id,username,group_id,is_muted');
     foreach ($rows as &$row) {
         $row += ($users[(int)($row['user_id'] ?? 0)] ?? user_summary_defaults());
         $last_reply_uid = (int)($row['last_reply_user_id'] ?? 0);
@@ -413,17 +346,6 @@ register_shutdown_function(function (): void {
     if (!$error || !in_array((int)$error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) return;
     debug_log_write('PHP fatal [' . (int)$error['type'] . '] ' . (string)$error['message'] . "\n" . (string)$error['file'] . ':' . (int)$error['line']);
 });
-function require_writable_dir(string $dir, string $message): void
-{
-    if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) err($message);
-    if (!is_writable($dir)) err($message);
-    $probe = @tempnam($dir, '.write-test-');
-    if ($probe === false || @file_put_contents($probe, '1', LOCK_EX) === false) {
-        if ($probe !== false) @unlink($probe);
-        err($message);
-    }
-    @unlink($probe);
-}
 function pinned_topic_ids(): array
 {
     return array_values(array_unique(array_filter(array_map('intval', preg_split('/\s*,\s*/', setting('pinned_topic_ids'), -1, PREG_SPLIT_NO_EMPTY) ?: []))));
@@ -533,11 +455,6 @@ function group_by_id(int $id): ?array
     }
     return $GLOBALS['__group_by_id_map'][$id] ?? null;
 }
-function user_by_id(int $id): ?array
-{
-    if ($id > 0 && $id === uid()) return me();
-    return row('app_users', 'id', $id);
-}
 function notification_badge_html(int $count): string
 {
     return $count > 0 ? '<span class="notify-badge">' . (int)$count . '</span>' : '';
@@ -581,7 +498,7 @@ function create_notification(int $recipient_id, int $sender_id, string $kind, st
 {
     $content = trim($content);
     if ($recipient_id <= 0 || $content === '') return false;
-    if ($recipient_id === $sender_id && $kind !== 'direct') return false;
+    if ($recipient_id === $sender_id) return false;
     $topic_id = $topic_id > 0 ? $topic_id : null;
     $reply_id = $reply_id > 0 ? $reply_id : null;
     $created_at = now();
@@ -589,34 +506,6 @@ function create_notification(int $recipient_id, int $sender_id, string $kind, st
     $notification_id = app_db_last_insert_id('app_notifications');
     q("UPDATE app_users SET unread_notifications=COALESCE(unread_notifications,0)+1 WHERE id=?", [$recipient_id]);
     return true;
-}
-function user_points_change(int $user_id, int $delta, string $reason = '系统调整', bool $notify = false, array $context = []): int
-{
-    if ($user_id <= 0 || $delta === 0) return 0;
-    [$actual, $now_points] = tx(function () use ($user_id, $delta): array {
-        $old = (int)(row('app_users', 'id', $user_id)['points'] ?? 0);
-        $new = $old + $delta;
-        $actual = $new - $old;
-        if ($actual !== 0) q("UPDATE app_users SET points=? WHERE id=?", [$new, $user_id]);
-        return [$actual, $new];
-    });
-    if ($actual === 0) return 0;
-    if ($user_id === uid()) unset($GLOBALS['__me_cache']);
-    $verb = $actual > 0 ? '增加' : '减少';
-    $notification_message = '积分' . $verb . ' ' . abs($actual) . '，原因：' . trim($reason) . '。当前积分 ' . $now_points . '。';
-    if ($notify) create_notification($user_id, 0, 'points', '你的' . $notification_message);
-    elseif ($user_id === uid()) {
-        $tip = '积分 ' . ($actual > 0 ? '+' : '') . $actual;
-        if (ajax_request()) $GLOBALS['__point_change_tip'] = $tip;
-        else set_flash($tip);
-    }
-    return $actual;
-}
-function user_points_set(int $user_id, int $points, string $reason = '系统调整'): int
-{
-    if ($user_id <= 0) return 0;
-    $old = (int)(row('app_users', 'id', $user_id)['points'] ?? 0);
-    return user_points_change($user_id, $points - $old, $reason);
 }
 function create_mention_notifications(int $topic_id, int $reply_id, string $body, int $sender_id): void
 {
@@ -643,43 +532,31 @@ function create_reply_notifications(int $topic_id, int $reply_id, string $body, 
 {
     create_mention_notifications($topic_id, $reply_id, $body, $sender_id);
 }
-function notification_box(): string
+function notifications_list(int $uid, int $limit, int $offset = 0): array
 {
-    $box = (string)($_GET['box'] ?? 'all');
-    return in_array($box, ['all', 'inbox', 'outbox'], true) ? $box : 'all';
-}
-function notifications_list(int $uid, int $limit, int $offset = 0, string $box = 'all'): array
-{
-    $where = $box === 'outbox' ? "sender_id=? AND kind='direct'" : ($box === 'inbox' ? "recipient_id=? AND kind='direct'" : 'recipient_id=?');
-    $params = [$uid, $limit, $offset];
-    $rows = q("SELECT * FROM app_notifications WHERE {$where} ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?", $params)->fetchAll();
-    $user_ids = array_merge(array_column($rows, 'sender_id'), array_column($rows, 'recipient_id'));
-    $users = rows_by_ids('app_users', $user_ids, 'id,username,avatar_style,avatar_seed');
+    $rows = q("SELECT * FROM app_notifications WHERE recipient_id=? ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?", [$uid, $limit, $offset])->fetchAll();
+    $users = rows_by_ids('app_users', array_column($rows, 'sender_id'), 'id,username');
     foreach ($rows as &$row) {
-        $display_id = (int)($row['sender_id'] ?? 0) === $uid ? (int)($row['recipient_id'] ?? 0) : (int)($row['sender_id'] ?? 0);
-        $u = $users[$display_id] ?? null;
+        $u = $users[(int)($row['sender_id'] ?? 0)] ?? null;
         $row['sender_username'] = (string)($u['username'] ?? '');
-        $row['sender_avatar_style'] = (string)($u['avatar_style'] ?? '');
-        $row['sender_avatar_seed'] = (string)($u['avatar_seed'] ?? '');
     }
     unset($row);
     return $rows;
 }
-function notifications_total(int $uid, string $box = 'all'): int
+function notifications_total(int $uid): int
 {
-    if ($box === 'all') return (int)val('SELECT COUNT(*) FROM app_notifications WHERE recipient_id=?', [$uid]);
-    return (int)val("SELECT COUNT(*) FROM app_notifications WHERE " . ($box === 'outbox' ? "sender_id=? AND kind='direct'" : "recipient_id=? AND kind='direct'"), [$uid]);
+    return (int)val('SELECT COUNT(*) FROM app_notifications WHERE recipient_id=?', [$uid]);
 }
-function notifications_unread_total(int $uid, bool $direct_only = false): int
+function notifications_unread_total(int $uid): int
 {
     $m = me();
-    if (!$direct_only && $m && (int)$m['id'] === $uid) return (int)($m['unread_notifications'] ?? 0);
-    return (int)val("SELECT COUNT(*) FROM app_notifications WHERE recipient_id=? AND read_at=0" . ($direct_only ? " AND kind='direct'" : ''), [$uid]);
+    if ($m && (int)$m['id'] === $uid) return (int)($m['unread_notifications'] ?? 0);
+    return (int)val('SELECT COUNT(*) FROM app_notifications WHERE recipient_id=? AND read_at=0', [$uid]);
 }
-function mark_notifications_read(int $uid, int $unread, bool $direct_only = false): void
+function mark_notifications_read(int $uid, int $unread): void
 {
     if ($unread <= 0) return;
-    q("UPDATE app_notifications SET read_at=? WHERE recipient_id=? AND read_at=0" . ($direct_only ? " AND kind='direct'" : ''), [now(), $uid]);
+    q("UPDATE app_notifications SET read_at=? WHERE recipient_id=? AND read_at=0", [now(), $uid]);
     q("UPDATE app_users SET unread_notifications=0 WHERE id=?", [$uid]);
     if (is_array($GLOBALS['__me_cache'] ?? null) && (int)$GLOBALS['__me_cache']['id'] === $uid) $GLOBALS['__me_cache']['unread_notifications'] = 0;
 }
@@ -716,21 +593,14 @@ function notification_row_html(array $n): string
             }
         }
     }
-    $kind = match ((string)($n['kind'] ?? '')) { 'mention' => '提及', 'sent' => '已发出', default => '通知' };
+    $kind = match ((string)($n['kind'] ?? '')) { 'mention' => '提及', default => '通知' };
     $unread = (int)($n['read_at'] ?? 0) === 0;
-    $quote = notification_excerpt($body);
-    $action = (string)($n['kind'] ?? '') === 'direct' && $sender_id > 0 ? '<a class="post-tag post-forum-badge notification-reply-action" href="' . h(route_url('notify', ['id' => $sender_id, 'quote' => $quote])) . '" onclick="openNotify(this.href);return false">回复TA</a>' : '';
     $sender_title = $sender_id > 0 ? '<a class="post-title" href="' . h(route_url('user', ['id' => $sender_id])) . '">' . h($sender_name) . '</a>' : '<span class="post-title">' . h($sender_name) . '</span>';
-    return '<li class="post-item notification-item' . ($unread ? ' unread' : '') . '"><div class="post-avatar">' . avatar_link_tag($sender_id ?: 0, $sender_name, (string)($n['sender_avatar_style'] ?? ''), '', (string)($n['sender_avatar_seed'] ?? '')) . '</div><div class="post-body"><div class="post-title-row notification-head">' . $sender_title . '<span class="post-user-group notification-kind">' . h($kind) . '</span>' . ($unread ? '<span class="notification-unread">未读</span>' : '') . '</div><div class="post-meta"><span>' . human_time((int)$n['created_at']) . '</span></div><div class="post-content notification-content">' . $content_html . '</div></div>' . $action . '</li>';
-}
-function admin_list_head(string $left = '', string $right = ''): string
-{
-    return '<div class="admin-list-head"><div class="admin-head-inline"><div class="admin-head-left-slot">' . $left . '</div><div class="admin-head-right-slot">' . $right . '</div></div></div>';
+    return '<li class="post-item notification-item' . ($unread ? ' unread' : '') . '"><div class="post-avatar">' . avatar_link_tag($sender_id ?: 0, $sender_name) . '</div><div class="post-body"><div class="post-title-row notification-head">' . $sender_title . '<span class="post-user-group notification-kind">' . h($kind) . '</span>' . ($unread ? '<span class="notification-unread">未读</span>' : '') . '</div><div class="post-meta"><span>' . human_time((int)$n['created_at']) . '</span></div><div class="post-content notification-content">' . $content_html . '</div></div></li>';
 }
 function user_state_tag_html(array $u): string
 {
     $tags = [];
-    if ((int)($u['is_banned'] ?? 0) === 1) $tags[] = '<span class="user-state-tag danger">禁访</span>';
     if ((int)($u['is_muted'] ?? 0) === 1) $tags[] = '<span class="user-state-tag danger">禁言</span>';
     return $tags ? '<span class="user-state-tags">' . implode('', $tags) . '</span>' : '';
 }
@@ -749,17 +619,6 @@ function sidebar_notice_card_html(string $title, array $items): string
     $html = '<div class="card sidebar-card quick-card"><div class="quick-wrap"><div class="quick-title">' . h($title) . '</div><ul class="quick-links notice-links">';
     foreach ($items as $item) $html .= '<li>' . h($item) . '</li>';
     return $html . '</ul></div></div>';
-}
-function top_bar_actions_html(array $actions, string $region): string
-{
-    $items = $actions[$region] ?? [];
-    if (!is_array($items)) return '';
-    $html = '';
-    foreach ($items as $item) {
-        if (is_string($item)) $html .= $item;
-        elseif (is_array($item)) $html .= (string)($item['html'] ?? '');
-    }
-    return $html;
 }
 function mobile_menu_content_html(?array $mine = null, ?array $forums = null): string
 {
@@ -789,11 +648,11 @@ function mobile_menu_content_html(?array $mine = null, ?array $forums = null): s
 function shell_html(string $main, string $sidebar, string $class = ''): string
 {
     $layout_class = 'forum-layout' . ($sidebar !== '' ? ' forum-layout-has-sidebar' : '');
-    return '<div class="home-shell' . ($class !== '' ? ' ' . h($class) : '') . '"><div class="' . $layout_class . '"><div class="forum-main"><div class="main-panel" data-slot="mainpanel_extra">' . $main . '</div></div>' . $sidebar . '</div></div>';
+    return '<div class="home-shell' . ($class !== '' ? ' ' . h($class) : '') . '"><div class="' . $layout_class . '"><div class="forum-main"><div class="main-panel" >' . $main . '</div></div>' . $sidebar . '</div></div>';
 }
-function tab_bar_html(array $items, string $active, string $class = '', string $slot = ''): string
+function tab_bar_html(array $items, string $active, string $class = ''): string
 {
-    $html = '<div class="tab-bar' . ($class !== '' ? ' ' . $class : '') . '"' . ($slot !== '' ? ' data-slot="' . h($slot) . '"' : '') . '>';
+    $html = '<div class="tab-bar' . ($class !== '' ? ' ' . $class : '') . '>';
     foreach ($items as $key => $item) {
         $label = is_array($item) ? (string)($item['label'] ?? '') : (string)$item;
         $href = is_array($item) ? (string)($item['href'] ?? '#') : '#';
@@ -809,9 +668,9 @@ function auth_tabs_html(string $active): string
         'register' => ['label' => '注册', 'href' => route_url('register')],
     ], $active, 'auth-tabs');
 }
-function sidebar_stack_html(array $parts, array $ctx = []): string
+function sidebar_stack_html(array $parts): string
 {
-    $html = '<aside class="sidebar" data-slot="sidebar.stack">';
+    $html = '<aside class="sidebar">';
     foreach ($parts as $part) if ($part !== '') $html .= $part;
     return $html . '</aside>';
 }
@@ -825,10 +684,10 @@ function sidebar_user_card_html(?array $m = null, bool $reply_button = false, in
     $links = '<a href="' . h(route_url('user', ['id' => (int)$m['id'], 'tab' => 'topics'])) . '">' . svg_icon('topic') . $prefix . '主题</a><a href="' . h(route_url('user', ['id' => (int)$m['id'], 'tab' => 'replies'])) . '">' . svg_icon('reply') . $prefix . '回帖</a>';
     if ($is_self) $links .= '<a href="' . h(route_url('user', ['id' => (int)$m['id'], 'tab' => 'notifications'])) . '">' . svg_icon('notify') . $prefix . '通知' . notification_badge_html($unread) . '</a><a href="' . h(route_url('profile')) . '">' . svg_icon('settings') . '个人设置</a>' . (can_access_admin() ? '<a href="' . h(route_url('admin')) . '">' . svg_icon('admin') . '后台面板</a>' : '');
     $user_url = route_url('user', ['id' => (int)$m['id']]);
-    $rank = h($m['group_name'] ?? '用户') . ' · 积分 ' . (int)($m['points'] ?? 0);
+    $rank = h($m['group_name'] ?? '用户');
     $state_tags = user_state_tag_html($m);
-    $html = '<div class="card sidebar-card user-card"><div class="user-wrap"><div class="user-header"><div class="user-header-info"><a class="user-avatar-big" href="' . $user_url . '">' . avatar_tag((int)$m['id'], (string)$m['username'], (string)($m['avatar_style'] ?? ''), '', (string)($m['avatar_seed'] ?? '')) . '</a><div><a class="user-name" href="' . $user_url . '">' . h($m['username']) . '</a><div class="user-rank">' . $rank . $state_tags . '</div></div></div></div><div class="user-links" data-slot="user.menu_links">' . $links . '</div></div>';
-    if (can_speak()) $html .= '<a class="btn-post' . ($is_self ? '' : ' notify-link') . '" href="' . h($reply_button ? '#reply' : ($is_self ? route_url('topic_edit', ['fid' => $fid ?: null]) : route_url('notify', ['id' => (int)$m['id']]))) . '"' . ($is_self || $reply_button ? '' : ' onclick="openNotify(this.href);return false"') . '>' . ($reply_button ? '回帖' : ($is_self ? '+ 发帖' : '私信TA')) . '</a>';
+    $html = '<div class="card sidebar-card user-card"><div class="user-wrap"><div class="user-header"><div class="user-header-info"><a class="user-avatar-big" href="' . $user_url . '">' . avatar_tag((int)$m['id'], (string)$m['username']) . '</a><div><a class="user-name" href="' . $user_url . '">' . h($m['username']) . '</a><div class="user-rank">' . $rank . $state_tags . '</div></div></div></div><div class="user-links" >' . $links . '</div></div>';
+    if (can_speak() && ($is_self || $reply_button)) $html .= '<a class="btn-post" href="' . h($reply_button ? '#reply' : route_url('topic_edit', ['fid' => $fid ?: null])) . '">' . ($reply_button ? '回帖' : '+ 发帖') . '</a>';
     return $html . '</div>';
 }
 function topic_user_group_html(array $row): string
@@ -890,7 +749,7 @@ function me(): ?array
         $u['group_id'] = $fallback_group_id;
     }
     $GLOBALS['__request_uid'] = (int)$u['id'];
-    return $GLOBALS['__me_cache'] = $u + ['group_name' => $g['name'], 'group_id' => (int)($u['group_id'] ?? 0), 'is_banned' => (int)($u['is_banned'] ?? 0), 'is_muted' => (int)($u['is_muted'] ?? 0), 'allow_manage' => (int)($g['allow_manage'] ?? 0), 'allow_admin' => (int)($g['allow_admin'] ?? 0)];
+    return $GLOBALS['__me_cache'] = $u + ['group_name' => $g['name'], 'group_id' => (int)($u['group_id'] ?? 0), 'is_muted' => (int)($u['is_muted'] ?? 0), 'allow_manage' => (int)($g['allow_manage'] ?? 0), 'allow_admin' => (int)($g['allow_admin'] ?? 0)];
 }
 function can_manage(): bool
 {
@@ -950,19 +809,12 @@ function need_admin(): void
     need_login();
     if (!can_access_admin()) err('无权限');
 }
-function need_manage(): void
-{
-    need_login();
-    if (!can_manage()) err('无权限');
-}
 function need_site_access(): void
 {
-    if (!is_super_user() && me() && !can_access_admin() && (int)me()['is_banned'] === 1 && ($_GET['a'] ?? '') !== 'logout') err('当前用户禁止访问');
     $a = $_GET['a'] ?? 'home';
     limit_pagination_request_pages();
     if (setting('site_closed') === '1' && !can_access_admin()) {
-        $core_allowed = in_array($a, ['login', 'logout', 'form_error', 'robots.txt', 'favicon.ico', 'apple-touch-icon.png', 'apple-touch-icon-precomposed.png'], true);
-        if (!$core_allowed) err('网站已关闭');
+        if (!in_array($a, ['login', 'logout', 'form_error'], true)) err('网站已关闭');
     }
 }
 function check(): void
@@ -984,7 +836,6 @@ function is_post_request(): bool
 }
 function json_response(array $data): never
 {
-    if (!isset($data['tip']) && !empty($GLOBALS['__point_change_tip'])) $data['tip'] = (string)$GLOBALS['__point_change_tip'];
     if (!isset($data['tip']) && !empty($GLOBALS['__ajax_tip'])) $data['tip'] = (string)$GLOBALS['__ajax_tip'];
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
@@ -1174,63 +1025,17 @@ function svg_icon(string $name): string
         'settings' => '<path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
         'admin' => '<path d="M12 3 4 6v6c0 5 3.4 7.8 8 9 4.6-1.2 8-4 8-9V6l-8-3Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 12l2 2 4-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
         'pages' => '<path d="M8 4h9a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9.5 9h6M9.5 12.5h6M9.5 16h3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
-        'upload' => '<path d="M12 15V5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="m8 9 4-4 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
     ];
     return isset($icons[$name]) ? '<svg class="meta-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">' . $icons[$name] . '</svg>' : '';
 }
-function avatar_styles(): array
-{
-    static $styles;
-    if ($styles === null) {
-        $names = explode(' ', 'dylan big-ears big-ears-neutral big-smile disco lorelei lorelei-neutral pixel-art pixel-art-neutral adventurer adventurer-neutral avataaars avataaars-neutral bottts bottts-neutral croodles croodles-neutral fun-emoji glass glyphs icons identicon initial-face initials micah miniavs notionists notionists-neutral open-peeps personas rings shape-grid shapes stripes thumbs toon-head triangles');
-        $styles = array_combine($names, array_map(fn(string $name): string => ucwords(str_replace('-', ' ', $name)), $names));
-    }
-    return $styles;
-}
-function avatar_style(string $style): string
-{
-    if ($style === '') return '';
-    $styles = avatar_styles();
-    return isset($styles[$style]) ? $style : 'dylan';
-}
-function avatar_seed_count(string $style): int
-{
-    return 48;
-}
-function decimal_mod(string $number, int $divisor): int
-{
-    $mod = 0;
-    foreach (str_split($number) as $digit) $mod = ($mod * 10 + (int)$digit) % $divisor;
-    return $mod;
-}
-function avatar_seed(string $style, string $seed, int $uid = 0): string
-{
-    $count = max(1, avatar_seed_count($style));
-    $seed = trim($seed);
-    if ($seed === '') $seed = (string)$uid;
-    if (ctype_digit($seed)) {
-        $mod = decimal_mod($seed, $count);
-        return (string)($mod === 0 ? $count : $mod);
-    }
-    $hash = (string)sprintf('%u', crc32($seed));
-    $mod = decimal_mod($hash, $count);
-    return (string)($mod === 0 ? $count : $mod);
-}
-function avatar_remote_url(string $style, string $seed): string
-{
-    return 'https://api.dicebear.com/10.x/' . rawurlencode($style) . '/svg?seed=' . rawurlencode($seed);
-}
-function avatar_tag(int $uid, string $name, string $style = '', string $class = '', string $seed = ''): string
+function avatar_tag(int $uid, string $name, string $class = ''): string
 {
     $classes = trim('avatar-img ' . $class);
-    $style = avatar_style($style) ?: 'dylan';
-    $seed = avatar_seed($style, $seed, $uid);
-    $src = avatar_remote_url($style, $seed);
-    return '<img class="' . h($classes) . '" src="' . h($src) . '" alt="' . h($name) . '" loading="lazy">';
+    return '<img class="' . h($classes) . '" src="' . h(asset_url('app/assets/avatar.svg')) . '" alt="' . h($name) . '" loading="lazy">';
 }
-function avatar_link_tag(int $uid, string $name, string $style = '', string $class = '', string $seed = ''): string
+function avatar_link_tag(int $uid, string $name, string $class = ''): string
 {
-    $avatar = avatar_tag($uid, $name, $style, $class, $seed);
+    $avatar = avatar_tag($uid, $name, $class);
     if ($uid < 1) return $avatar;
     return '<a class="avatar-profile-link" href="' . h(route_url('user', ['id' => $uid])) . '" aria-label="查看 ' . h($name) . ' 的个人主页">' . $avatar . '</a>';
 }
@@ -1280,14 +1085,6 @@ function asset_url(string $file): string
 {
     return app_url($file);
 }
-function markdown_link_text(string $text): string
-{
-    return str_replace([']', '['], ['\]', '\['], $text);
-}
-function upload_hash_dir(string $hash): string
-{
-    return substr($hash, 0, 2);
-}
 function parse_path_route(): void
 {
     $path = (string)(parse_url((string)($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH) ?? '');
@@ -1327,25 +1124,6 @@ function markdown_html(string $text, int $quote_depth = 0, int $topic_id = 0): s
     if ($text === '') return '';
     return '<p>' . str_replace("\n", '<br>', content_special_links_html(h($text), $topic_id)) . '</p>';
 }
-function avatar_picker_html(array $u): string
-{
-    $uid = (int)$u['id'];
-    $style = avatar_style((string)($u['avatar_style'] ?? ''));
-    $seed = (string)($u['avatar_seed'] ?? '');
-    if ($seed !== '') $seed = avatar_seed($style ?: 'dylan', $seed, $uid);
-    $name = (string)($u['username'] ?? '');
-    $styles = avatar_styles();
-    $local_only = false;
-    $base_url = '';
-    $seeds = array_map('strval', range(1, avatar_seed_count($style ?: 'dylan')));
-    $html = '<div class="grid avatar-field"><div class="avatar-picker profile-disclosure" data-profile-disclosure data-seed="' . $uid . '" data-avatar-base="' . h($base_url) . '" data-avatar-local-only="' . ($local_only ? '1' : '0') . '"><div class="profile-disclosure-summary"><div class="profile-disclosure-main"><span class="profile-avatar-summary">' . avatar_tag($uid, $name, $style, '', $seed) . '</span><span class="profile-disclosure-heading"><span>头像</span><small>当前头像</small></span></div><button class="profile-edit-action" type="button" data-profile-toggle aria-expanded="false">修改</button></div><div class="profile-disclosure-detail is-hidden" data-profile-edit><div class="avatar-picker-head"><div class="avatar-picker-preview">' . avatar_tag($uid, $name, $style, '', $seed) . '</div><select name="avatar_style">';
-    if (!$local_only) $html .= '<option value=""' . ($style === '' ? ' selected' : '') . '>默认 Dylan</option>';
-    foreach ($styles as $k => $v) $html .= '<option value="' . h($k) . '"' . ($k === $style ? ' selected' : '') . '>' . h($v) . '</option>';
-    $html .= '</select></div><input type="hidden" name="avatar_seed" value="' . h($seed) . '"><div class="avatar-options">';
-    if (!$local_only) $html .= '<button class="avatar-option' . ($seed === '' ? ' active' : '') . '" type="button" data-seed="">' . avatar_tag($uid, $name, $style, '', '') . '</button>';
-    foreach ($seeds as $s) $html .= '<button class="avatar-option' . ($s === $seed ? ' active' : '') . '" type="button" data-seed="' . h($s) . '">' . avatar_tag($uid, $name, $style, '', $s) . '</button>';
-    return $html . '</div></div></div></div>';
-}
 function topic_post_row(array $row, string $body, int $time, string $ops = '', string $title = '', string $stats = '', bool $highlight = false, array $ctx = []): string
 {
     $is_reply = isset($row['topic_id']);
@@ -1353,14 +1131,13 @@ function topic_post_row(array $row, string $body, int $time, string $ops = '', s
     $floor = $is_reply ? (int)($ctx['reply_position'] ?? 0) : 0;
     $has_title = $title !== '';
     $title_html = $has_title ? '<div class="post-topic-title"><h1 class="post-content-title">' . h($title) . '</h1>' . $stats . '</div>' : '';
-    $avatar = avatar_link_tag((int)$row['user_id'], (string)$row['username'], (string)($row['avatar_style'] ?? ''), '', (string)($row['avatar_seed'] ?? ''));
+    $avatar = avatar_link_tag((int)$row['user_id'], (string)$row['username']);
     $floor_attr = $floor > 0 ? ' data-floor="' . $floor . '"' : '';
     $floor_html = $floor > 0 ? '<a class="post-floor" href="' . h(route_url('topic', ['id' => $topic_id, 'floor' => $floor])) . '">#' . $floor . '</a>' : '';
-    $ops_html = $ops !== '' || $floor_html !== '' ? '<div class="post-ops"' . ($is_reply ? '' : ' data-slot="topic.actions"') . '>' . $ops . $floor_html . '</div>' : '';
-    $row_slots = $is_reply ? 'reply.after_render reply.content_after' : 'topic.after_render topic.content_after';
+    $ops_html = $ops !== '' || $floor_html !== '' ? '<div class="post-ops">' . $ops . $floor_html . '</div>' : '';
     $uid_html = ((int)($row['user_id'] ?? 0) > 0 && (string)($row['username'] ?? '') !== '匿名') ? '<span class="post-user-group user-uid-badge" title="用户 UID"><span class="user-uid-icon" aria-hidden="true">' . svg_icon('id') . '</span>' . (int)$row['user_id'] . '</span>' : '';
     $tags_html = topic_user_group_html($row) . user_state_tag_html($row) . $uid_html;
-    $html = '<li class="post-item post-entry' . ($has_title ? ' has-title' : '') . ($highlight ? ' post-highlight' : '') . '" id="post-' . (int)($row['id'] ?? 0) . '" data-slot="' . $row_slots . '"' . $floor_attr . '>' . $title_html . '<div class="post-avatar">' . $avatar . '</div><div class="post-body"><div class="post-head' . ($floor > 0 ? ' has-floor' : '') . '"><div class="post-info"><a class="post-title post-author" href="' . h(route_url('user', ['id' => (int)$row['user_id']])) . '">' . h($row['username']) . '</a><span class="post-time">' . human_time($time) . '</span></div>' . $ops_html . '</div><div class="post-meta">' . $tags_html . '</div></div><div class="post-content">' . markdown_html($body, 0, $topic_id) . '</div></li>';
+    $html = '<li class="post-item post-entry' . ($has_title ? ' has-title' : '') . ($highlight ? ' post-highlight' : '') . '" id="post-' . (int)($row['id'] ?? 0) . '"' . $floor_attr . '>' . $title_html . '<div class="post-avatar">' . $avatar . '</div><div class="post-body"><div class="post-head' . ($floor > 0 ? ' has-floor' : '') . '"><div class="post-info"><a class="post-title post-author" href="' . h(route_url('user', ['id' => (int)$row['user_id']])) . '">' . h($row['username']) . '</a><span class="post-time">' . human_time($time) . '</span></div>' . $ops_html . '</div><div class="post-meta">' . $tags_html . '</div></div><div class="post-content">' . markdown_html($body, 0, $topic_id) . '</div></li>';
     return $html;
 }
 function quote_reply_action(array $row, int $floor = 0): string
@@ -1442,7 +1219,7 @@ function topic_list_row(array $t, string $sort): string
         $reply_excerpt = trim((string)($t['my_reply_excerpt'] ?? ''));
         $reply_excerpt_html = $reply_excerpt !== '' ? '<div class="profile-reply-excerpt">' . h($reply_excerpt) . '</div>' : '';
         $user_link = '<a href="' . h(route_url('user', ['id' => (int)$t['user_id']])) . '">' . svg_icon('user') . h($t['username']) . '</a>';
-        $html = '<li class="post-item" data-slot="topic.after_render"><div class="post-avatar">' . avatar_link_tag((int)$t['user_id'], (string)$t['username'], (string)($t['avatar_style'] ?? ''), '', (string)($t['avatar_seed'] ?? '')) . '</div><div class="post-body">' . $reply_excerpt_html . '<div class="post-meta"><span>' . $user_link . '</span><span>' . human_time($time) . '</span></div></div></li>';
+        $html = '<li class="post-item"><div class="post-avatar">' . avatar_link_tag((int)$t['user_id'], (string)$t['username']) . '</div><div class="post-body">' . $reply_excerpt_html . '<div class="post-meta"><span>' . $user_link . '</span><span>' . human_time($time) . '</span></div></div></li>';
         return $html;
     }
     $forum = $t['forum'] ?? ['id' => (int)$t['forum_id'], 'name' => ''];
@@ -1462,7 +1239,7 @@ function topic_list_row(array $t, string $sort): string
     $badges = ((int)($t['is_pinned'] ?? 0) ? '<span class="topic-badge pinned">置顶</span>' : '');
     $style = (string)($t['highlight_style'] ?? '') !== '' ? ' style="' . h((string)$t['highlight_style']) . '"' : '';
     $forum_badge = $has_forum ? '<a class="post-tag post-forum-badge" href="' . h(route_url('forum', ['id' => (int)$forum['id']])) . '">' . h($forum['name']) . '</a>' : '';
-    $html = '<li class="post-item' . ((int)($t['is_pinned'] ?? 0) ? ' topic-pinned' : '') . '" data-slot="topic.after_render"><div class="post-avatar">' . avatar_link_tag((int)$t['user_id'], (string)$t['username'], (string)($t['avatar_style'] ?? ''), '', (string)($t['avatar_seed'] ?? '')) . '</div><div class="post-body"><div class="post-title-row" data-slot="topic.title_suffix">' . $badges . '<a class="post-title" href="' . h($topic_url) . '"' . $style . '>' . h($t['title']) . '</a>' . $pages . '</div>' . $reply_excerpt_html . '<div class="post-meta">' . $meta . '</div></div>' . $forum_badge . '</li>';
+    $html = '<li class="post-item' . ((int)($t['is_pinned'] ?? 0) ? ' topic-pinned' : '') . '"><div class="post-avatar">' . avatar_link_tag((int)$t['user_id'], (string)$t['username']) . '</div><div class="post-body"><div class="post-title-row">' . $badges . '<a class="post-title" href="' . h($topic_url) . '"' . $style . '>' . h($t['title']) . '</a>' . $pages . '</div>' . $reply_excerpt_html . '<div class="post-meta">' . $meta . '</div></div>' . $forum_badge . '</li>';
     return $html;
 }
 function topic_stats_html(int $view_count, int $reply_count): string
@@ -1480,7 +1257,7 @@ function twig(): Twig\Environment
         'cache' => DATA_DIR . '/twig-cache',
         'auto_reload' => true,
     ]);
-    $html_safe = ['route_url', 'index_url', 'admin_url', 'asset_url', 'app_url', 'svg_icon', 'avatar_tag', 'avatar_link_tag', 'avatar_picker_html', 'form_token', 'hidden_inputs', 'input', 'textarea', 'checkbox', 'number_input', 'select_input', 'render_form_fields', 'select_forum', 'tab_bar_html', 'auth_tabs_html', 'admin_tabs', 'paginate', 'simple_paginate', 'topic_page_links', 'topic_list_row', 'topic_post_row', 'notification_row_html', 'notification_badge_html', 'sidebar_user_card_html', 'sidebar_notice_card_html', 'user_state_tag_html', 'topic_user_group_html', 'topic_stats_html', 'quote_reply_action', 'post_action_form', 'markdown_html', 'human_time', 'form_shell', 'shell_html', 'sidebar_stack_html', 'admin_list_head', 'flash_json'];
+    $html_safe = ['route_url', 'index_url', 'admin_url', 'asset_url', 'app_url', 'svg_icon', 'avatar_tag', 'avatar_link_tag', 'form_token', 'hidden_inputs', 'input', 'textarea', 'checkbox', 'number_input', 'select_input', 'render_form_fields', 'select_forum', 'tab_bar_html', 'auth_tabs_html', 'admin_tabs', 'paginate', 'simple_paginate', 'topic_page_links', 'topic_list_row', 'topic_post_row', 'notification_row_html', 'notification_badge_html', 'sidebar_user_card_html', 'sidebar_notice_card_html', 'user_state_tag_html', 'topic_user_group_html', 'topic_stats_html', 'quote_reply_action', 'post_action_form', 'markdown_html', 'human_time', 'form_shell', 'shell_html', 'sidebar_stack_html', 'flash_json'];
     foreach ($html_safe as $fn) $env->addFunction(new Twig\TwigFunction($fn, $fn, ['is_safe' => ['html']]));
     foreach (['setting', 'csrf_token', 'uid', 'can_manage', 'can_speak', 'can_access_admin', 'is_super_user', 'notification_excerpt', 'excerpt_length', 'notification_link'] as $fn) $env->addFunction(new Twig\TwigFunction($fn, $fn));
     $env->addGlobal('app_version', APP_VERSION);
@@ -1516,7 +1293,7 @@ function page_nav_data(string $site_name): array
         'mine' => $mine,
         'mine_unread' => $mine ? (int)($mine['unread_notifications'] ?? 0) : 0,
         'mine_link' => $mine ? route_url('user', ['id' => (int)$mine['id'], 'tab' => 'notifications']) : route_url('login'),
-        'mine_avatar' => $mine ? avatar_tag((int)$mine['id'], (string)$mine['username'], (string)($mine['avatar_style'] ?? ''), 'mobile-nav-avatar', (string)($mine['avatar_seed'] ?? '')) : svg_icon('user'),
+        'mine_avatar' => $mine ? avatar_tag((int)$mine['id'], (string)$mine['username'], 'mobile-nav-avatar') : svg_icon('user'),
         'visible_forums' => $visible,
         'has_more_forums' => count($forums) > $visible_limit,
         'all_forums' => $forums,
@@ -1544,10 +1321,6 @@ function page_common_data(string $title, array $seo = []): array
         'flash' => $flash,
         'nav' => page_nav_data($site_name),
     ];
-}
-function page(string $title, string $body, array $seo = []): void
-{
-    echo template('raw_body.html.twig', ['body_html' => $body] + page_common_data($title, $seo));
 }
 function render_page(string $template, array $data, string $title, array $seo = []): void
 {
@@ -1650,24 +1423,18 @@ function require_valid_username(string $username): void
     if ($result === false) err('用户名包含非法字符');
     if ($result === 1) err('用户名不能包含空白或不可见字符');
 }
-function save_user(bool $admin = false, ?int $target_user_id = null): void
+function save_user(?int $target_user_id = null): void
 {
-    $ip = ip_addr();
-    $requested_user_id = id();
-    $user_id = $admin ? $requested_user_id : ($target_user_id ?? $requested_user_id);
-    if ($admin && $user_id === 1 && !is_super_user()) err('无权限');
-    if (!$admin && $user_id > 0 && $user_id !== uid()) err('无权限');
-    if (!$admin && $target_user_id === null && (array_key_exists('id', $_GET) || array_key_exists('id', $_POST))) err('参数错误');
-    $is_registration = !$admin && !$user_id;
+    $user_id = $target_user_id ?? id();
+    if ($user_id > 0 && $user_id !== uid()) err('无权限');
+    if ($target_user_id === null && (array_key_exists('id', $_GET) || array_key_exists('id', $_POST))) err('参数错误');
+    $is_registration = !$user_id;
     $username = post('username', length_limit('username', 'max'));
     $email = post('email', length_limit('email', 'max'));
     $bio = post('bio', length_limit('bio', 'max'));
-    $avatar_style = avatar_style(post('avatar_style', DB_STRING_MAX_LENGTH));
-    $avatar_seed = post('avatar_seed', DB_STRING_MAX_LENGTH);
-    if ($avatar_seed !== '') $avatar_seed = avatar_seed($avatar_style ?: 'dylan', $avatar_seed);
     $old_user = $user_id ? row('app_users', 'id', $user_id) : null;
     if ($user_id && !$old_user) err('用户不存在');
-    if (!$admin && $old_user) {
+    if ($old_user) {
         $username = (string)$old_user['username'];
         $email = (string)$old_user['email'];
     }
@@ -1675,62 +1442,31 @@ function save_user(bool $admin = false, ?int $target_user_id = null): void
     require_length($username, length_limit('username', 'min'), '用户名');
     require_length($email, length_limit('email', 'min'), '邮箱地址');
     require_length($bio, length_limit('bio', 'min'), '个人简介');
-    $gid = $admin ? max(1, (int)$_POST['group_id']) : ($old_user ? (int)$old_user['group_id'] : (int)setting('default_group_id', '2'));
+    $gid = $old_user ? (int)$old_user['group_id'] : (int)setting('default_group_id', '2');
     if (!group_by_id($gid)) err('用户组不存在');
-    $points = $admin ? (int)($_POST['points'] ?? 0) : (int)($old_user['points'] ?? 0);
-    $is_banned = $admin ? (isset($_POST['is_banned']) ? 1 : 0) : (int)($old_user['is_banned'] ?? 0);
-    $is_muted = $admin ? (isset($_POST['is_muted']) ? 1 : 0) : (int)($old_user['is_muted'] ?? 0);
     $pwd = (string)($_POST['password'] ?? '');
     $pwd2 = (string)($_POST['password2'] ?? '');
     if ($pwd !== '') require_password_length($pwd);
     if ($pwd !== '' && $pwd !== $pwd2) err('两次密码不一致');
-    if (!$admin && $old_user) {
-        $username = (string)$old_user['username'];
-        $email = (string)$old_user['email'];
-    }
     if (!$old_user || (string)$old_user['username'] !== $username) require_valid_username($username);
     if ($is_registration && preg_match_all('/./us', $username) < length_limit('username', 'min')) err('用户名长度不能少于' . length_limit('username', 'min') . '个字符');
     if ($is_registration && preg_match_all('/./us', $username) > length_limit('username', 'max')) err('用户名不能超过' . length_limit('username', 'max') . '个字符');
     $exists = $user_id ? one("SELECT id FROM app_users WHERE username=? AND id<>?", [$username, $user_id]) : one("SELECT id FROM app_users WHERE username=?", [$username]);
     if ($exists) err('用户名已存在');
     if ($user_id) {
-        $p = [$username, $email, $bio, $avatar_style, $avatar_seed, $gid, $is_banned, $is_muted, $user_id];
-        $sql = "UPDATE app_users SET username=?,email=?,bio=?,avatar_style=?,avatar_seed=?,group_id=?,is_banned=?,is_muted=? WHERE id=?";
+        $sql = "UPDATE app_users SET username=?,email=?,bio=? WHERE id=?";
+        $p = [$username, $email, $bio, $user_id];
         if ($pwd !== '') {
-            $sql = "UPDATE app_users SET username=?,email=?,bio=?,avatar_style=?,avatar_seed=?,group_id=?,is_banned=?,is_muted=?,password=? WHERE id=?";
-            $p = [$username, $email, $bio, $avatar_style, $avatar_seed, $gid, $is_banned, $is_muted, password_hash($pwd, PASSWORD_DEFAULT), $user_id];
+            $sql = "UPDATE app_users SET username=?,email=?,bio=?,password=? WHERE id=?";
+            $p = [$username, $email, $bio, password_hash($pwd, PASSWORD_DEFAULT), $user_id];
         }
         q($sql, $p);
         if ($pwd !== '' && $user_id === uid()) csrf_cookie_clear();
-        if ($admin) user_points_set($user_id, $points, '管理员调整');
     } else {
         if ($pwd === '') err('密码不能为空');
-        q("INSERT INTO app_users(username,password,email,bio,avatar_style,avatar_seed,group_id,points,is_banned,is_muted,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)", [$username, password_hash($pwd, PASSWORD_DEFAULT), $email, $bio, $avatar_style, $avatar_seed, $gid, $points, $is_banned, $is_muted, now()]);
-        $new_user_id = app_db_last_insert_id('app_users');
-        $GLOBALS['__last_saved_user_id'] = $new_user_id;
+        q("INSERT INTO app_users(username,password,email,bio,group_id,created_at) VALUES(?,?,?,?,?,?)", [$username, password_hash($pwd, PASSWORD_DEFAULT), $email, $bio, $gid, now()]);
+        $GLOBALS['__last_saved_user_id'] = app_db_last_insert_id('app_users');
     }
-}
-function user_notify_page(): void
-{
-    need_login();
-    $target = row('app_users', 'id', id()) ?: err('用户不存在');
-    if ((int)$target['id'] === uid()) err('不能通知自己');
-    if (is_post_request()) {
-        $quote = notification_excerpt((string)($_POST['quote'] ?? ''));
-        $body = post('content', length_limit('reply_body', 'max'));
-        $content = trim(($quote !== '' ? '> ' . $quote . "\n\n" : '') . $body);
-        if ($content === '') err('通知内容不能为空');
-        create_notification((int)$target['id'], uid(), 'direct', $content);
-        if (ajax_request()) json_response(['ok' => 1, 'message' => '已发送']);
-        go(route_url('user', ['id' => (int)$target['id'], 'tab' => 'notifications']));
-    }
-    $quote = notification_excerpt((string)($_GET['quote'] ?? ''));
-    $data = ['target' => $target, 'quote' => $quote, 'notify_max_length' => length_limit('reply_body', 'max')];
-    if (ajax_request()) {
-        echo template('notify_form.html.twig', $data);
-        exit;
-    }
-    render_page('notify_page.html.twig', $data + ['me' => me()], '通知TA');
 }
 function base_url(): string
 {
@@ -2026,7 +1762,6 @@ function login_page(): void
 {
     if (uid()) go(consume_auth_return_url());
     if (is_post_request()) {
-        $ip = ip_addr();
         $u = one("SELECT id,password FROM app_users WHERE username=?", [post('username', DB_STRING_MAX_LENGTH)]);
         if ($u && password_verify((string)$_POST['password'], $u['password'])) {
             complete_login((int)$u['id']);
@@ -2037,7 +1772,7 @@ function login_page(): void
     $sidebar = sidebar_stack_html([
         sidebar_notice_card_html('登录注意事项', ['请使用用户名登录。', '密码区分大小写。', '公共设备登录后请及时退出。']),
     ]);
-    page('登录', shell_html(auth_tabs_html('login') . '<div class="form-panel auth-panel" data-slot="login.after_form"><h2>登录</h2><form method="post" data-slot="login.form_extra">' . form_token() . input('用户名', 'username', '', 'text', true) . input('密码', 'password', '', 'password', true) . '<button>登录</button></form></div>', $sidebar));
+    render_page('login.html.twig', ['sidebar' => $sidebar], '登录');
 }
 function register_page(): void
 {
@@ -2045,7 +1780,7 @@ function register_page(): void
     if (setting('allow_register', '1') !== '1') err('注册已关闭');
     if (is_post_request()) {
         if (array_key_exists('id', $_GET) || array_key_exists('id', $_POST)) err('参数错误');
-        save_user(false);
+        save_user();
         $user_id = (int)($GLOBALS['__last_saved_user_id'] ?? 0);
         if ($user_id <= 0) err('注册失败');
         start_cookie_login($user_id);
@@ -2071,7 +1806,7 @@ function profile_page(): void
     if (!array_key_exists($profile_tab, $profile_tabs)) $profile_tab = 'profile';
 
     if ($profile_tab === 'profile' && is_post_request()) {
-        save_user(false, uid());
+        save_user(uid());
         set_flash('个人资料已保存');
         go(route_url('profile'));
     }
@@ -2088,15 +1823,13 @@ function user_page(): void
     if ($username === '' && uid() && id() === uid()) $user = me();
     else {
         $user = $username !== ''
-            ? one("SELECT id,username,bio,avatar_style,avatar_seed,group_id,points,is_banned,is_muted FROM app_users WHERE username=?", [$username])
+            ? one("SELECT id,username,bio,group_id,is_muted FROM app_users WHERE username=?", [$username])
             : row('app_users', 'id', id());
     }
     $user = $user ?: err('你访问的页面不存在', 404);
     $g = group_by_id((int)$user['group_id']) ?: ['name' => '用户'];
     $user['group_name'] = $g['name'];
-    $tab = $_GET['tab'] ?? 'topics';
-    if ($tab === 'notify') user_notify_page();
-    else topic_index_page(null, $user);
+    topic_index_page(null, $user);
 }
 function topic_index_sort(bool $profile): string
 {
@@ -2132,10 +1865,9 @@ function topic_index_data(int $fid, ?array $user, string $profile_tab, string $q
     }
     $where = $where_parts ? 'WHERE ' . implode(' AND ', $where_parts) : '';
     if ($profile_uid && $profile_tab === 'notifications') {
-        $notification_box = notification_box();
-        $total = notifications_total($profile_uid, $notification_box);
-        $unread_total = $notification_box === 'all' ? notifications_unread_total($profile_uid) : 0;
-        $rows = notifications_list($profile_uid, $size, $offset, $notification_box);
+        $total = notifications_total($profile_uid);
+        $unread_total = notifications_unread_total($profile_uid);
+        $rows = notifications_list($profile_uid, $size, $offset);
     } elseif ($profile_uid && $profile_tab === 'replies') {
         $total = (int)val("SELECT COUNT(*) FROM app_replies WHERE user_id=?", [$profile_uid]);
         $reply_rows = q("SELECT id,topic_id,user_id,body,created_at FROM app_replies WHERE user_id=? ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?", [$profile_uid, $size, $offset])->fetchAll();
@@ -2217,7 +1949,7 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
     $profile_tab_allowed = true;
     $profile_tab_notice = '';
     $data = topic_index_data($fid, $filter_user, $profile_tab, $q, $search_field, $sort, $p, $size, $profile_tab_allowed, $profile_tab_notice);
-    if ($profile_uid && $profile_tab_allowed && $profile_tab === 'notifications' && notification_box() === 'all') mark_notifications_read($profile_uid, (int)$data['unread_total']);
+    if ($profile_uid && $profile_tab_allowed && $profile_tab === 'notifications') mark_notifications_read($profile_uid, (int)$data['unread_total']);
     $title = $profile_uid ? $filter_user['username'] : ($filter_forum ? $filter_forum['name'] : '首页');
     $seo = [];
     if ($profile_uid) $seo = page_seo('user', ['id' => $profile_uid], (string)($filter_user['bio'] ?? $filter_user['username']));
@@ -2233,15 +1965,10 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
     $notification_rows = [];
     if ($profile_uid && $profile_tab_allowed && $profile_tab === 'notifications') {
         foreach ($data['rows'] as $i => $n) {
-            if ((int)($n['sender_id'] ?? 0) === uid()) {
-                $n['read_at'] = 1;
-                $n['sender_id'] = (int)$n['recipient_id'];
-                $n['kind'] = 'sent';
-            }
             $notification_rows[] = ['divider' => (int)$data['unread_total'] > 0 && $off + $i === (int)$data['unread_total'], 'row' => $n];
         }
     }
-    $page_query = $search_query . ($profile_uid ? 'tab=' . $profile_tab . ($profile_tab === 'notifications' ? '&box=' . notification_box() : '') : 'sort=' . $sort);
+    $page_query = $search_query . ($profile_uid ? 'tab=' . $profile_tab : 'sort=' . $sort);
     $pagination = $data['simple_pagination'] ? simple_paginate($p > 1, $data['has_next_page'], $p, $url($page_query)) : paginate((int)$data['total'], $p, $size, $url($page_query));
     $is_home_first_page = !$profile_uid && !$filter_forum && $q === '' && $p === 1;
     $empty_text = $q !== '' ? '没有找到匹配的' . ($search_field === 'reply' ? '回帖' : '主题') : ((string)$data['profile_empty'] !== '' ? (string)$data['profile_empty'] : ($profile_uid ? ($profile_tab === 'replies' ? '暂无回帖' : '暂无主题') : '暂无主题'));
@@ -2258,15 +1985,9 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
         'rows' => $data['rows'],
         'list_rows' => $list_rows,
         'notification_rows' => $notification_rows,
-        'notification_tabs' => [
-            'all' => ['label' => '全部', 'href' => $url('tab=notifications&box=all')],
-            'inbox' => ['label' => '收件箱', 'href' => $url('tab=notifications&box=inbox')],
-            'outbox' => ['label' => '发件箱', 'href' => $url('tab=notifications&box=outbox')],
-        ],
-        'notification_box' => notification_box(),
         'empty_text' => $empty_text,
         'pagination' => $pagination,
-        'sidebar' => sidebar_stack_html([sidebar_user_card_html($profile_uid ? $filter_user : null, false, $fid)], ['is_home_first_page' => $is_home_first_page, 'user' => $filter_user]),
+        'sidebar' => sidebar_stack_html([sidebar_user_card_html($profile_uid ? $filter_user : null, false, $fid)]),
         'shell_class' => $profile_uid ? 'profile-mobile-sidebar' . ($own_profile ? ' profile-mobile-sidebar-own' : '') : ($is_home_first_page ? 'home-mobile-sidebar' : ''),
     ], $title, $seo);
 }
@@ -2454,17 +2175,6 @@ function admin_tabs(string $tab): string
     }
     return tab_bar_html($items, $tab, 'admin-tabs', 'admin.tabs');
 }
-function robots_page(): void
-{
-    header('Content-Type: text/plain; charset=utf-8');
-    echo "User-agent: *\nDisallow:\n";
-    exit;
-}
-function favicon_page(): void
-{
-    header('Location: ' . asset_url('app/assets/index.svg'), true, 302);
-    exit;
-}
 function form_error_route(): void
 {
     $raw = base64_decode((string)($_COOKIE['__form_error'] ?? ''), true);
@@ -2498,10 +2208,6 @@ function core_routes(): array
 {
     return [
         'home' => 'home_page',
-        'robots.txt' => 'robots_page',
-        'favicon.ico' => 'favicon_page',
-        'apple-touch-icon.png' => 'favicon_page',
-        'apple-touch-icon-precomposed.png' => 'favicon_page',
         'search' => [Search::class, 'page'],
         'mobile_menu' => 'mobile_menu_route',
         'forum' => 'forum_page',
@@ -2512,11 +2218,9 @@ function core_routes(): array
         'register' => 'register_page',
         'form_error' => 'form_error_route',
         'profile' => 'profile_page',
-        'notify' => 'user_notify_page',
         'topic_edit' => 'topic_edit_page',
         'reply_edit' => 'reply_edit_page',
         'delete' => 'delete_route',
-        'migrate' => [Setup::class, 'migrate_page'],
         'admin' => [Admin::class, 'route'],
     ];
 }

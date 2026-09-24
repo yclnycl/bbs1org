@@ -3,7 +3,7 @@
     <div class="bar">
         <div class="bar-left">
             <a class="brand" href="{{ route_url('home') }}">{{ nav.site_name }}</a>
-            <nav class="forum-nav" data-slot="top.menu_links" aria-label="顶部版块">
+            <nav class="forum-nav" aria-label="顶部版块">
                 {% for f in nav.visible_forums %}
                     <a class="forum-link{{ f.id == active_forum ? ' active' : '' }}" href="{{ route_url('forum', {id: f.id}) }}">{{ f.name }}</a>
                 {% endfor %}
@@ -12,7 +12,7 @@
                 {% endif %}
             </nav>
         </div>
-        <div class="bar-right" data-slot="top.actions">
+        <div class="bar-right">
             <a class="search-page-link" href="{{ route_url('search') }}" aria-label="搜索">
                 <span class="search-page-fake-input">搜索</span>
                 <span class="search-page-fake-icon"><svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.7"/><path d="m13 13 4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></span>
@@ -37,6 +37,6 @@
 <div class="mobile-menu-backdrop" id="mobile-menu" data-mobile-menu-url="{{ route_url('mobile_menu') }}" hidden>
     <aside class="mobile-menu-drawer" id="mobile-menu-drawer" aria-label="移动端菜单">
         <div class="mobile-menu-head"><strong>菜单</strong><button type="button" class="mobile-menu-close" data-mobile-menu-close aria-label="关闭菜单">×</button></div>
-        <div class="mobile-menu-body" data-slot="top.menu_links user.menu_links sidebar.feature_links"></div>
+        <div class="mobile-menu-body"></div>
     </aside>
 </div>

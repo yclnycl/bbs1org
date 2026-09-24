@@ -175,28 +175,6 @@ const openPrompt = (message, title = "请输入", value = "1") => _openModalBox(
     box.append(text, input, actions);
     return input;
 });
-window.openNotify = async function (url) {
-    try {
-        const response = await fetch(url, {headers: {"X-Requested-With": "XMLHttpRequest"}});
-        const html = await response.text();
-        if ((response.headers.get("content-type") || "").includes("application/json")) {
-            const data = JSON.parse(html);
-            if (data.redirect) window.location.href = data.redirect;
-            else showToast(data.message || "打开失败");
-            return false;
-        }
-        const notifyPreview = document.createElement("div");
-        notifyPreview.innerHTML = html;
-        const username = notifyPreview.querySelector("[data-notify-username]")?.dataset.notifyUsername || "";
-        openModal(username ? `私信 @${username}` : "私信", html);
-        const textarea = modalBody?.querySelector("form")?.querySelector("textarea");
-        textarea?.focus();
-        textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
-    } catch (_) {
-        showToast("打开失败");
-    }
-    return false;
-};
 const runPageFlash = () => {
     if (window.__pageFlash) showToast(window.__pageFlash);
 };
@@ -240,109 +218,6 @@ const initTabBarWrap = () => {
 };
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initTabBarWrap);
 else initTabBarWrap();
-function avatarSeed(seed) {
-    const n = String(seed || "0").replace(/\D/g, "") || "0";
-    const mod = [...n].reduce((r, d) => (r * 10 + Number(d)) % 48, 0);
-    return String(mod || 48);
-}
-function avatarPickerStyle(p) {
-    const s = p?.querySelector("select[name=avatar_style]");
-    return s?.value || "dylan";
-}
-function avatarRemoteUrl(style, seed) {
-    return "https://api.dicebear.com/10.x/" + encodeURIComponent(style) + "/svg?seed=" + encodeURIComponent(seed);
-}
-function avatarPickerUrl(p, seed) {
-    const style = avatarPickerStyle(p);
-    const normalizedSeed = avatarSeed(seed || p.dataset.seed || "0");
-    if (p?.dataset.avatarLocalOnly === "1" && p.dataset.avatarBase) {
-        return p.dataset.avatarBase + encodeURIComponent(style + "_" + normalizedSeed + ".svg");
-    }
-    return avatarRemoteUrl(style, normalizedSeed);
-}
-function setAvatarPickerImg(img, p, seed) {
-    if (!img) return;
-    img.onerror = null;
-    img.src = avatarPickerUrl(p, seed);
-}
-function refreshAvatarPicker(p) {
-    const k = p?.querySelector("input[name=avatar_seed]");
-    const v = k?.value || "";
-    const i = p?.querySelector(".avatar-picker-preview img");
-    setAvatarPickerImg(i, p, v);
-    p?.querySelectorAll(".avatar-option").forEach(b => {
-        const seed = b.dataset.seed || "";
-        const img = b.querySelector("img");
-        setAvatarPickerImg(img, p, seed);
-        b.classList.toggle("active", seed === v);
-    });
-}
-function rebuildLocalAvatarPicker(p) {
-    if (p?.dataset.avatarLocalOnly !== "1") return;
-    const seeds = Array.from({length: 48}, (_, i) => String(i + 1));
-    const options = p.querySelector(".avatar-options");
-    const hidden = p.querySelector("input[name=avatar_seed]");
-    if (!options || !hidden || !seeds.length) return;
-    if (!seeds.includes(hidden.value)) hidden.value = seeds[0];
-    options.innerHTML = "";
-    for (const seed of seeds) {
-        const button = document.createElement("button");
-        button.className = "avatar-option" + (seed === hidden.value ? " active" : "");
-        button.type = "button";
-        button.dataset.seed = seed;
-        const img = document.createElement("img");
-        img.className = "avatar-img";
-        img.alt = "";
-        img.loading = "lazy";
-        img.src = avatarPickerUrl(p, seed);
-        button.appendChild(img);
-        options.appendChild(button);
-    }
-}
-document.addEventListener("change", e => {
-    const p = e.target.closest(".avatar-picker");
-    if (p) {
-        if (e.target.matches("select[name=avatar_style]")) rebuildLocalAvatarPicker(p);
-        refreshAvatarPicker(p);
-    }
-});
-document.addEventListener("click", e => {
-    const b = e.target.closest(".avatar-option");
-    if (!b) return;
-    const p = b.closest(".avatar-picker");
-    const k = p?.querySelector("input[name=avatar_seed]");
-    if (k) {
-        k.value = b.dataset.seed || "";
-        refreshAvatarPicker(p);
-    }
-});
-document.addEventListener("change", async e => {
-    const input = e.target.closest("[data-auto-submit]");
-    if (!input) return;
-    const form = input.closest("form");
-    if (!form) return;
-    const previous = input.checked;
-    const body = new FormData(form);
-    input.disabled = true;
-    try {
-        const response = await fetch(formActionUrl(form), {method: "POST", body, credentials: "same-origin", headers: {"X-Requested-With": "XMLHttpRequest"}});
-        const data = await response.json();
-        if (!data?.ok) throw new Error(data?.message || "保存失败");
-        const replaceTarget = form.dataset.replaceTarget || "";
-        const replaceEl = replaceTarget ? form.closest(replaceTarget) : null;
-        if (replaceEl && data.html) {
-            replaceEl.outerHTML = data.html;
-            showToast(data.message || "已保存");
-            return;
-        }
-        showToast(data.message || "已保存");
-    } catch (err) {
-        input.checked = !previous;
-        showToast(err.message || "保存失败");
-    } finally {
-        input.disabled = false;
-    }
-});
 document.addEventListener("change", e => {
     const action = e.target.closest("[data-topic-action]");
     if (!action) return;
@@ -357,15 +232,6 @@ document.addEventListener("change", e => {
     const form = select.closest("form");
     if (form) form.dataset.confirm = select.options[select.selectedIndex]?.dataset?.confirm || "";
 });
-function syncTopicExtensionFields(toggle) {
-    const panel = toggle.closest("[data-topic-extension]");
-    const fields = panel?.querySelector("[data-topic-extension-fields]");
-    if (fields) fields.disabled = !toggle.checked;
-}
-document.addEventListener("change", e => {
-    const toggle = e.target instanceof Element ? e.target.closest("[data-topic-extension-toggle]") : null;
-    if (toggle instanceof HTMLInputElement) syncTopicExtensionFields(toggle);
-});
 document.addEventListener("click", e => {
     const swatch = e.target.closest("[data-topic-color]");
     if (!swatch) return;
@@ -376,59 +242,10 @@ document.addEventListener("click", e => {
     input.value = swatch.dataset.topicColor || "";
     wrap.querySelectorAll("[data-topic-color]").forEach(btn => btn.classList.toggle("active", btn === swatch));
 });
-const initTopicExtensions = () => {
-    document.querySelectorAll(".topic-extension").forEach(container => {
-        if (container.dataset.extensionInit) return;
-        const panels = Array.from(container.children).filter(el => el instanceof HTMLElement && (el.matches("[data-topic-extension]") || el.querySelector(":scope > details > summary")));
-        if (!panels.length) return;
-        container.dataset.extensionInit = "1";
-        const cards = document.createElement("div");
-        cards.className = "topic-extension-list";
-        const form = document.createElement("div");
-        form.className = "topic-extension-form";
-        const select = (panel, card) => {
-            const activate = !card.classList.contains("active");
-            cards.querySelectorAll(".topic-extension-card").forEach(item => item.classList.remove("active"));
-            panels.forEach(item => { item.hidden = true; });
-            if (activate) {
-                card.classList.add("active");
-                panel.hidden = false;
-                form.hidden = false;
-            } else {
-                form.hidden = true;
-            }
-        };
-        let initial = null;
-        panels.forEach(panel => {
-            const summary = panel.querySelector("details > summary");
-            const label = (summary?.querySelector("span")?.textContent || summary?.textContent || "扩展功能").trim() || "扩展功能";
-            const card = document.createElement("button");
-            card.type = "button";
-            card.className = "topic-extension-card";
-            const labelEl = document.createElement("span");
-            labelEl.textContent = label;
-            card.appendChild(labelEl);
-            card.addEventListener("click", () => select(panel, card));
-            cards.appendChild(card);
-            const details = panel.querySelector(":scope > details");
-            if (details) details.open = true;
-            panel.hidden = true;
-            form.appendChild(panel);
-            const boxes = panel.querySelectorAll('input[type="checkbox"]');
-            const enabled = panel.querySelector('input[type="checkbox"][data-topic-extension-toggle]:checked') || (boxes.length === 1 && boxes[0].checked ? boxes[0] : null);
-            if (!initial && enabled) initial = { panel, card };
-        });
-        if (initial) select(initial.panel, initial.card);
-        form.hidden = !initial;
-        container.append(cards, form);
-    });
-};
 window.addEventListener("DOMContentLoaded", () => {
-    initTopicExtensions();
     document.querySelectorAll("[data-topic-action]").forEach(action => {
         action.dispatchEvent(new Event("change", {bubbles: true}));
     });
-    document.querySelectorAll("input[data-topic-extension-toggle]").forEach(syncTopicExtensionFields);
 });
 document.addEventListener("click", e => {
     if (e.target?.closest("[data-modal-close]")) closeModal();
@@ -465,11 +282,6 @@ document.addEventListener("click", e => {
 });
 document.addEventListener("submit", async e => {
     if (e.defaultPrevented) return;
-    if (window.bbs1AttachmentUpload?.isUploading(e.target)) {
-        e.preventDefault();
-        showToast("附件上传中");
-        return;
-    }
     const promptField = e.submitter?.dataset?.promptField || e.target?.dataset?.promptField || "";
     if (promptField) {
         e.preventDefault();
@@ -514,20 +326,16 @@ document.addEventListener("submit", async e => {
         }
         if (status) status.textContent = "提交中";
         try {
-            window.bbs1AttachmentUpload?.beforeSubmit(replyForm);
             const response = await fetch(formActionUrl(replyForm), {method: "POST", body: new FormData(replyForm), headers: {"X-Requested-With": "XMLHttpRequest"}});
             const data = await response.json();
             if (!data.ok) throw new Error(data.message || "提交失败");
-            window.bbs1AttachmentUpload?.afterSubmit();
             if (data.redirect) {
                 window.location.href = data.redirect;
                 return;
             }
-            let reply = null;
             list?.querySelector(".empty-state")?.remove();
             if (data.html && list) {
                 list.insertAdjacentHTML("beforeend", data.html);
-                reply = list.lastElementChild?.matches(".post-entry") ? list.lastElementChild : null;
             }
             const title = document.querySelector(".post-topic-title");
             const stats = title?.querySelector(".post-content-stats");
@@ -538,15 +346,12 @@ document.addEventListener("submit", async e => {
                 } else if (stats) stats.remove();
             }
             replyForm.reset();
-            if (window.turnstile && replyForm.querySelector(".cf-turnstile")) window.turnstile.reset(replyForm.querySelector(".cf-turnstile"));
             if (status) status.textContent = "已回复";
             if (data.tip) showToast(data.tip);
-            document.dispatchEvent(new CustomEvent("bbs1:reply-saved", {detail: {form: replyForm, reply}}));
         } catch (err) {
             const message = err?.message || "提交失败";
             if (status) status.textContent = message;
             showToast(message);
-            if (window.turnstile && replyForm.querySelector(".cf-turnstile")) window.turnstile.reset(replyForm.querySelector(".cf-turnstile"));
         } finally {
             delete replyForm.dataset.submitting;
             if (button) {
@@ -556,37 +361,6 @@ document.addEventListener("submit", async e => {
                     button.textContent = buttonText;
                 }
             }
-        }
-        return;
-    }
-    const notifyForm = e.target.closest(".notify-form");
-    if (notifyForm) {
-        e.preventDefault();
-        const button = e.submitter?.form === notifyForm ? e.submitter : notifyForm.querySelector("button[type=submit],button:not([type]),input[type=submit]");
-        const status = notifyForm.querySelector(".notify-status");
-        if (button) {
-            button.disabled = true;
-            button.setAttribute("aria-busy", "true");
-        }
-        if (status) status.textContent = "发送中";
-        try {
-            const response = await fetch(formActionUrl(notifyForm), {method: "POST", body: new FormData(notifyForm), headers: {"X-Requested-With": "XMLHttpRequest"}});
-            const data = await response.json();
-            if (!data.ok) throw new Error(data.message || "发送失败");
-            if (data.redirect) {
-                window.location.href = data.redirect;
-                return;
-            }
-            closeModal();
-            showToast(data.tip || data.message || "已发送");
-        } catch (err) {
-            showToast(err?.message || "发送失败");
-        } finally {
-            if (button) {
-                button.disabled = false;
-                button.removeAttribute("aria-busy");
-            }
-            if (status) status.textContent = "";
         }
         return;
     }
@@ -618,7 +392,6 @@ document.addEventListener("submit", async e => {
         }
     }
     try {
-        window.bbs1AttachmentUpload?.beforeSubmit(form);
         const body = new FormData(form);
         if (button?.name) body.append(button.name, button.value ?? "1");
         const response = await fetch(formActionUrl(form), {method: "POST", body, headers: {"X-Requested-With": "XMLHttpRequest"}});
@@ -630,7 +403,6 @@ document.addEventListener("submit", async e => {
             throw new Error("操作失败");
         }
         if (!data.ok) throw new Error(data.message || "操作失败");
-        window.bbs1AttachmentUpload?.afterSubmit();
         const successMessage = data.tip && data.tip !== data.message
             ? `${data.message || "操作完成"}，${data.tip}`
             : (data.message || data.tip || "操作完成");
@@ -667,7 +439,6 @@ document.addEventListener("submit", async e => {
         if (data.redirect) setTimeout(() => { window.location.href = data.redirect; }, 800);
     } catch (err) {
         showToast(err?.message || "操作失败");
-        if (window.turnstile && form.querySelector(".cf-turnstile")) window.turnstile.reset(form.querySelector(".cf-turnstile"));
         resetButton();
     }
 });

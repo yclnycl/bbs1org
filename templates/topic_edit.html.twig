@@ -1,10 +1,10 @@
 {% extends 'layout.html.twig' %}
 {% block content %}
     <div class="home-shell"><div class="forum-layout forum-layout-has-sidebar">
-        <div class="forum-main"><div class="main-panel" data-slot="mainpanel_extra">
+        <div class="forum-main"><div class="main-panel">
             <div class="form-panel topic-form-panel">
                 <h2>{{ title }}</h2>
-                <form method="post" enctype="multipart/form-data" data-slot="attachment.uploader topic.form_extra">
+                <form method="post">
                     {{ form_token() }}
                     <input type="hidden" name="id" value="{{ t.id }}">
                     {{ select_forum(t.forum_id) }}

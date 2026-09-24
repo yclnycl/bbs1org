@@ -1,9 +1,9 @@
 {% extends 'layout.html.twig' %}
 {% block content %}
     <div class="home-shell{{ shell_class ? ' ' ~ shell_class : '' }}"><div class="{{ sidebar != '' ? 'forum-layout forum-layout-has-sidebar' : 'forum-layout' }}">
-        <div class="forum-main"><div class="main-panel" data-slot="mainpanel_extra">
+        <div class="forum-main"><div class="main-panel">
             {% if profile_uid %}
-                <div class="profile-toolbar" data-slot="user.profile_tabs">{{ tab_bar_html(profile_tabs, profile_tab) }}</div>
+                <div class="profile-toolbar">{{ tab_bar_html(profile_tabs, profile_tab) }}</div>
             {% else %}
                 {% if q == '' %}
                     <div class="mobile-forum-strip">
@@ -13,14 +13,13 @@
                         {% endfor %}
                     </div>
                 {% endif %}
-                <div class="topic-toolbar" data-slot="topic.index_tabs topic.toolbar_actions">
+                <div class="topic-toolbar">
                     {{ tab_bar_html(tab_items, sort) }}
                     {% if can_speak() %}<a class="tab-post" href="{{ route_url('topic_edit', fid ? {fid: fid} : {}) }}">+ 发帖</a>{% endif %}
                 </div>
             {% endif %}
             <ul class="post-list">
                 {% if profile_uid and profile_tab_allowed and profile_tab == 'notifications' %}
-                    <div class="notification-box-tabs">{{ tab_bar_html(notification_tabs, notification_box, 'notify-tabs', 'user.notifications.tabs') }}</div>
                     {% if not rows %}
                         <li class="empty-state">暂无通知</li>
                     {% else %}

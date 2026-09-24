@@ -1,7 +1,7 @@
 {% extends 'layout.html.twig' %}
 {% block content %}
     <div class="home-shell"><div class="forum-layout forum-layout-has-sidebar">
-        <div class="forum-main"><div class="main-panel" data-slot="mainpanel_extra">
+        <div class="forum-main"><div class="main-panel">
             <div class="breadcrumb"><a href="{{ route_url('home') }}">首页</a><span>/</span><a href="{{ route_url('forum', {id: forum.id}) }}">{{ forum.name }}</a></div>
             <div class="post-topic-title">
                 <h1 class="post-content-title"><a href="{{ topic_url }}">{{ t.title }}</a></h1>
@@ -22,7 +22,7 @@
             <div class="reply-panel" id="reply">
                 <div class="reply-panel-head"><h3>发表回复</h3><span class="reply-status">{{ reply_status }}</span></div>
                 {% if can_reply %}
-                    <form class="ajax-reply-form" method="post" action="{{ route_url('reply_edit') }}" data-slot="reply.form_extra">
+                    <form class="ajax-reply-form" method="post" action="{{ route_url('reply_edit') }}">
                         {{ form_token() }}
                         <input type="hidden" name="topic_id" value="{{ t.id }}">
                         {{ textarea('内容', 'body', '', true) }}

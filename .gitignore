@@ -1,7 +1,5 @@
 app/*
-!app/assets/index.css
-!app/assets/index.js
-!app/assets/index.svg
+!app/assets/
 !app/optional/
 !app/version.php
 /vendor/

@@ -13,7 +13,7 @@ COPY docker/php-bbs.ini /usr/local/etc/php/conf.d/zz-bbs.ini
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 RUN chmod +x /usr/local/bin/entrypoint.sh \
-    && mkdir -p /app/app/data /app/app/upload /app/app/avatars /run/nginx \
+    && mkdir -p /app/app/data /run/nginx \
     && chown -R www-data:www-data /app/app
 
 EXPOSE 8080

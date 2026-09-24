@@ -1,10 +1,10 @@
 {% extends 'layout.html.twig' %}
 {% block content %}
     <div class="home-shell"><div class="forum-layout forum-layout-has-sidebar">
-        <div class="forum-main"><div class="main-panel" data-slot="mainpanel_extra">
+        <div class="forum-main"><div class="main-panel">
             <div class="form-panel reply-edit-panel">
                 <div class="reply-edit-head"><h2>编辑回复</h2></div>
-                <form method="post" data-slot="attachment.uploader reply.form_extra">
+                <form method="post">
                     {{ form_token() }}
                     <input type="hidden" name="id" value="{{ r.id }}">
                     <input type="hidden" name="topic_id" value="{{ r.topic_id }}">

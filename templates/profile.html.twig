@@ -1,16 +1,15 @@
 {% extends 'layout.html.twig' %}
 {% block content %}
     <div class="home-shell"><div class="forum-layout forum-layout-has-sidebar">
-        <div class="forum-main"><div class="main-panel" data-slot="mainpanel_extra">
-            <div class="profile-toolbar">{{ tab_bar_html(profile_tabs, profile_tab, '', 'profile.settings_tabs') }}</div>
+        <div class="forum-main"><div class="main-panel">
+            <div class="profile-toolbar">{{ tab_bar_html(profile_tabs, profile_tab) }}</div>
             {% if profile_tab == 'profile' %}
-                <div class="form-panel" data-slot="profile.after_form">
+                <div class="form-panel">
                     <div class="profile-account-grid">
                         <div class="profile-account-card"><span>用户名</span><strong>{{ u.username }}</strong></div>
                         <div class="profile-account-card"><span>用户 UID</span><strong>{{ u.id }}</strong></div>
                         <div class="profile-account-card"><span>邮箱</span><strong title="{{ u.email }}">{{ u.email }}</strong></div>
                         <div class="profile-account-card"><span>注册时间</span><strong>{{ registered_at }}</strong></div>
-                        <div class="profile-account-card"><span>积分</span><strong>{{ u.points }}</strong></div>
                         <div class="profile-account-card profile-account-logout">
                             <form class="post-action-form" method="post" action="{{ route_url('logout') }}">
                                 {{ form_token() }}
@@ -20,7 +19,6 @@
                     </div>
                     <form method="post">
                         {{ form_token() }}
-                        {{ avatar_picker_html(u) }}
                         {{ textarea('简介', 'bio', u.bio) }}
                         <div class="grid profile-disclosure" data-profile-disclosure>
                             <div>

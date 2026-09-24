@@ -1,11 +1,11 @@
 {% extends 'layout.html.twig' %}
 {% block content %}
     <div class="home-shell"><div class="forum-layout forum-layout-has-sidebar">
-        <div class="forum-main"><div class="main-panel" data-slot="mainpanel_extra">
+        <div class="forum-main"><div class="main-panel">
             {{ auth_tabs_html('login') }}
-            <div class="form-panel auth-panel" data-slot="login.after_form">
+            <div class="form-panel auth-panel">
                 <h2>登录</h2>
-                <form method="post" data-slot="login.form_extra">
+                <form method="post">
                     {{ form_token() }}
                     {{ input('用户名', 'username', '', 'text', true) }}
                     {{ input('密码', 'password', '', 'password', true) }}

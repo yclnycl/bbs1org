@@ -1,6 +1,8 @@
 {% extends 'layout.html.twig' %}
 {% import 'macros/ui.html.twig' as ui %}
 {% import 'macros/form.html.twig' as f %}
+{% block head %}{% if can_reply %}<link rel="stylesheet" href="{{ app_url('app/assets/vendor/easymde/easymde.min.css') }}?v={{ app_version }}">{% endif %}{% endblock %}
+{% block scripts %}{% if can_reply %}<script src="{{ app_url('app/assets/vendor/easymde/easymde.min.js') }}?v={{ app_version }}" defer></script>{% endif %}{% endblock %}
 {% block content %}
     <div class="home-shell topic-page"><div class="forum-layout forum-layout-has-sidebar">
         <div class="forum-main"><div class="main-panel">
@@ -27,7 +29,7 @@
                     <form class="ajax-reply-form" method="post" action="{{ route_url('reply_edit') }}">
                         {{ f.token() }}
                         <input type="hidden" name="topic_id" value="{{ t.id }}">
-                        {{ f.textarea('内容', 'body', '', true) }}
+                        {{ f.markdown_editor('内容', 'body', '', true, true, '支持 Markdown 语法，可点工具栏按钮插入格式') }}
                         <button type="submit" data-loading-text="正在回复">回复</button>
                     </form>
                 {% elseif not current_uid %}

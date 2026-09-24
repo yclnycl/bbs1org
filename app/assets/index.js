@@ -488,3 +488,103 @@ window.addEventListener("load", () => {
     const target = /^\d+$/.test(replyId) ? document.getElementById("post-" + replyId) : (/^\d+$/.test(floor) ? document.querySelector('[data-floor="' + floor + '"]') : null);
     if (target) target.scrollIntoView({block:"center"});
 });
+/* --- Markdown 编辑器：EasyMDE（app/assets/vendor/easymde，MIT）；预览走后端同一个渲染函数 --- */
+const mdIcon = paths => '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths + '</svg>';
+const mdEditors = new WeakMap();
+const mdPreviewCache = new WeakMap();
+const mdPreviewTimers = new WeakMap();
+const mdPreviewTokens = new WeakMap();
+/* 工具栏沿用 EasyMDE 自带动作，只换成内联 SVG 图标，避免再依赖 Font Awesome CDN */
+const mdToolbar = () => [
+    {name: "undo", action: EasyMDE.undo, title: "撤销", icon: mdIcon('<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>')},
+    {name: "redo", action: EasyMDE.redo, title: "重做", icon: mdIcon('<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>')},
+    "|",
+    {name: "bold", action: EasyMDE.toggleBold, title: "粗体 Ctrl+B", icon: mdIcon('<path d="M6 4h8a4 4 0 0 1 0 8H6zM6 12h9a4 4 0 0 1 0 8H6z"/>')},
+    {name: "italic", action: EasyMDE.toggleItalic, title: "斜体 Ctrl+I", icon: mdIcon('<line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/>')},
+    {name: "strikethrough", action: EasyMDE.toggleStrikethrough, title: "删除线", icon: mdIcon('<path d="M16 4H9a3 3 0 0 0-2.83 4"/><path d="M14 12a4 4 0 0 1 0 8H6"/><line x1="4" y1="12" x2="20" y2="12"/>')},
+    {name: "heading", action: EasyMDE.toggleHeadingSmaller, title: "标题", icon: mdIcon('<path d="M6 4v16M18 4v16M6 12h12"/>')},
+    {name: "code", action: EasyMDE.toggleCodeBlock, title: "代码块", icon: mdIcon('<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>')},
+    {name: "quote", action: EasyMDE.toggleBlockquote, title: "引用", icon: mdIcon('<path fill="currentColor" stroke="none" d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/><path fill="currentColor" stroke="none" d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/>')},
+    {name: "unordered-list", action: EasyMDE.toggleUnorderedList, title: "无序列表", icon: mdIcon('<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>')},
+    {name: "ordered-list", action: EasyMDE.toggleOrderedList, title: "有序列表", icon: mdIcon('<line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-1 2-2s-1-1-2-1"/>')},
+    "|",
+    {name: "link", action: EasyMDE.drawLink, title: "链接 Ctrl+K", icon: mdIcon('<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>')},
+    {name: "image", action: EasyMDE.drawImage, title: "图片", icon: mdIcon('<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>')},
+    {name: "table", action: EasyMDE.drawTable, title: "表格", icon: mdIcon('<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/>')},
+    {name: "horizontal-rule", action: EasyMDE.drawHorizontalRule, title: "分隔线", icon: mdIcon('<line x1="4" y1="12" x2="20" y2="12"/>')},
+    "|",
+    {name: "preview", action: EasyMDE.togglePreview, title: "预览", icon: mdIcon('<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>')},
+    {name: "side-by-side", action: EasyMDE.toggleSideBySide, title: "并排预览", icon: mdIcon('<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/>')},
+    {name: "fullscreen", action: EasyMDE.toggleFullScreen, title: "全屏", icon: mdIcon('<path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>')},
+];
+const mdPreviewRequest = async (textarea, preview) => {
+    const url = textarea.dataset.previewUrl || "";
+    const form = textarea.closest("form");
+    if (!url || !preview || !form) return;
+    const token = (mdPreviewTokens.get(textarea) || 0) + 1;
+    mdPreviewTokens.set(textarea, token);
+    const body = new FormData();
+    body.append("_csrf", form.querySelector('input[name="_csrf"]')?.value || "");
+    body.append("body", textarea.value);
+    const topicId = form.querySelector('input[name="topic_id"]')?.value || form.querySelector('input[name="id"]')?.value || "";
+    if (topicId) body.append("topic_id", topicId);
+    try {
+        const response = await fetch(url, {method: "POST", body, headers: {"X-Requested-With": "XMLHttpRequest"}, credentials: "same-origin"});
+        const data = await response.json().catch(() => null);
+        if (mdPreviewTokens.get(textarea) !== token) return;
+        if (!data || !data.ok) throw new Error(data?.message || "预览失败");
+        mdPreviewCache.set(textarea, data.html || "");
+        preview.innerHTML = data.html || '<p class="editor-preview-empty">还没有内容</p>';
+    } catch (error) {
+        if (mdPreviewTokens.get(textarea) !== token || mdPreviewCache.has(textarea)) return;
+        preview.innerHTML = '<p class="editor-preview-empty">预览失败，请稍后重试</p>';
+    }
+};
+const mdPreviewSchedule = (textarea, preview) => {
+    clearTimeout(mdPreviewTimers.get(textarea));
+    mdPreviewTimers.set(textarea, setTimeout(() => mdPreviewRequest(textarea, preview), 250));
+};
+const mdInitEditors = () => {
+    if (typeof window.EasyMDE !== "function") return;
+    document.querySelectorAll("textarea[data-markdown-editor]").forEach(textarea => {
+        if (textarea.dataset.markdownReady === "1") return;
+        textarea.dataset.markdownReady = "1";
+        // CodeMirror 会隐藏原文本域，隐藏的必填控件会让浏览器拒绝提交，改成提交前用脚本校验
+        textarea.removeAttribute("required");
+        const editor = new EasyMDE({
+            element: textarea,
+            autoDownloadFontAwesome: false,
+            spellChecker: false,
+            status: false,
+            forceSync: true,
+            minHeight: "132px",
+            placeholder: textarea.getAttribute("placeholder") || "",
+            toolbar: mdToolbar(),
+            // 预览面板直接套用正文排版样式，预览和帖子看起来一致
+            previewClass: ["editor-preview", "post-content"],
+            previewRender: (plainText, preview) => {
+                const pane = preview instanceof HTMLElement ? preview : null;
+                if (pane) mdPreviewSchedule(textarea, pane);
+                return mdPreviewCache.get(textarea) ?? '<p class="editor-preview-empty">正在渲染…</p>';
+            },
+        });
+        mdEditors.set(textarea, editor);
+    });
+};
+document.addEventListener("submit", event => {
+    const form = event.target instanceof HTMLFormElement ? event.target : null;
+    if (!form) return;
+    const empty = Array.from(form.querySelectorAll("textarea[data-markdown-editor][data-markdown-required]")).find(textarea => textarea.value.trim() === "");
+    if (!empty) return;
+    event.preventDefault();
+    event.stopPropagation();
+    showToast("内容不能为空");
+    mdEditors.get(empty)?.codemirror.focus();
+}, true);
+document.addEventListener("reset", event => {
+    const form = event.target instanceof HTMLFormElement ? event.target : null;
+    if (!form) return;
+    form.querySelectorAll("textarea[data-markdown-editor]").forEach(textarea => mdEditors.get(textarea)?.value(""));
+});
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mdInitEditors);
+else mdInitEditors();

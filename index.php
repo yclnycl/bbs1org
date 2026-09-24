@@ -5,6 +5,7 @@ use app\optional\Bootstrap;
 use app\optional\Db\Database;
 use app\optional\Db\SqlitePdo;
 use app\optional\DebugLog;
+use app\optional\Markdown;
 use app\optional\Model\Forum;
 use app\optional\Model\Group;
 use app\optional\Model\Notification;
@@ -811,38 +812,15 @@ function parse_path_route(): void
     if (isset($segments[0]) && $segments[0] !== 'a' && !array_key_exists('a', $_GET)) $_GET['a'] = rawurldecode($segments[0]);
     if (isset($segments[1]) && ctype_digit($segments[1]) && !array_key_exists('id', $_GET)) $_GET['id'] = rawurldecode($segments[1]);
 }
-function content_html_token(array &$tokens, string $html): string
+function markdown_html(string $text, int $topic_id = 0): string
 {
-    $key = "\x1B" . count($tokens) . "\x1B";
-    $tokens[$key] = $html;
-    return $key;
-}
-function content_special_links_html(string $escaped_text, int $topic_id = 0): string
-{
-    if (!str_contains($escaped_text, '@')) return $escaped_text;
-    $tokens = [];
-    $escaped_text = preg_replace_callback('/@([^\s@#<]{1,32})\s+#(\d+)/u', function ($m) use (&$tokens, $topic_id) {
-        if ($topic_id <= 0) return $m[0];
-        $url = route_url('topic', ['id' => $topic_id, 'floor' => (int)$m[2]]);
-        return content_html_token($tokens, '<a class="post-mention post-floor-mention" href="' . h($url) . '" target="_blank" rel="noopener">@' . $m[1] . ' #' . (int)$m[2] . '</a>');
-    }, $escaped_text) ?? $escaped_text;
-    $escaped_text = preg_replace_callback('/(?<![\p{L}\p{N}._%+\-])@([\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*)/u', function ($m) {
-        $username = html_entity_decode((string)$m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        return '<a class="post-mention" href="' . h(route_url('user', ['username' => $username])) . '">@' . $m[1] . '</a>';
-    }, $escaped_text) ?? $escaped_text;
-    return strtr($escaped_text, $tokens);
-}
-function markdown_html(string $text, int $quote_depth = 0, int $topic_id = 0): string
-{
-    $text = str_replace(["\r\n", "\r"], "\n", trim($text));
-    if ($text === '') return '';
-    return '<p>' . str_replace("\n", '<br>', content_special_links_html(h($text), $topic_id)) . '</p>';
+    return Markdown::html($text, $topic_id);
 }
 /** 通知正文的富文本渲染：Markdown + 把《主题标题》整体做成一个链接 */
 function notification_content_html(array $n): string
 {
     $body = (string)($n['content'] ?? '');
-    $content_html = markdown_html($body);
+    $content_html = markdown_html($body, (int)($n['topic_id'] ?? 0));
     if ((int)($n['topic_id'] ?? 0) <= 0 && (int)($n['reply_id'] ?? 0) <= 0) return $content_html;
     $url = notification_link($n);
     if ($url === '') return $content_html;
@@ -854,7 +832,7 @@ function notification_content_html(array $n): string
     }, $body, 1, $count);
     if (is_string($source) && $count > 0) {
         // 标题整体做成一个链接，标题里的 @ 提及就不会产生嵌套的 a 标签
-        return str_replace($title_marker, '<a href="' . h($url) . '">' . h($topic_title) . '</a>', markdown_html($source));
+        return str_replace($title_marker, '<a href="' . h($url) . '">' . h($topic_title) . '</a>', markdown_html($source, (int)($n['topic_id'] ?? 0)));
     }
     $view_link = '<a href="' . h($url) . '">查看主题</a>';
     $content_html = preg_replace('/<\/p>\s*$/u', ' ' . $view_link . '</p>', $content_html, 1, $paragraph_count) ?? $content_html;
@@ -1879,12 +1857,20 @@ function mobile_menu_route(): void
     header('Content-Type: text/html; charset=utf-8');
     echo mobile_menu_content_html(me());
 }
+/** 编辑器预览：与正文共用同一个渲染函数，预览结果就是发出去的样子 */
+function preview_route(): void
+{
+    require_post();
+    need_login();
+    json_response(['ok' => 1, 'html' => markdown_html((string)($_POST['body'] ?? ''), id('topic_id'))]);
+}
 function core_routes(): array
 {
     return [
         'home' => 'home_page',
         'search' => [Search::class, 'page'],
         'mobile_menu' => 'mobile_menu_route',
+        'preview' => 'preview_route',
         'forum' => 'forum_page',
         'topic' => 'topic_page',
         'user' => 'user_page',

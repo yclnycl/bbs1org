@@ -9,6 +9,7 @@
     <title>{{ page_title }}</title>
     <link rel="icon" type="image/svg+xml" href="{{ asset_url('app/assets/index.svg') }}">
     <link rel="stylesheet" href="{{ app_url('app/assets/index.css') }}?v={{ app_version }}">
+    {% block head %}{% endblock %}
 </head>
 <body>
 <a class="skip-link" href="#main">跳到主要内容</a>
@@ -25,6 +26,7 @@
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 <script>window.__pageFlash={{ flash_json(flash) }};</script>
+{% block scripts %}{% endblock %}
 <script src="{{ app_url('app/assets/index.js') }}?v={{ app_version }}" defer></script>
 </body>
 </html>

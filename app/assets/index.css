@@ -1614,6 +1614,49 @@ a:focus-visible,
     border-radius: var(--r-md)
 }
 
+/* --- Markdown 正文的块级元素：标题、列表、分隔线、表格横向滚动 --- */
+.post-content h1,
+.post-content h2,
+.post-content h3,
+.post-content h4,
+.post-content h5,
+.post-content h6{
+    margin: var(--sp-5) 0 var(--sp-3);
+    color: var(--ink);
+    font-weight: 600;
+    line-height: var(--lh-tight)
+}
+
+.post-content h1{font-size: var(--fs-2xl)}
+.post-content h2{font-size: var(--fs-xl)}
+.post-content h3{font-size: var(--fs-lg)}
+.post-content h4,
+.post-content h5,
+.post-content h6{font-size: var(--fs-md);color: var(--ink-2)}
+.post-content > :first-child{margin-top: 0}
+.post-content ul,
+.post-content ol{
+    margin: 0 0 var(--sp-3);
+    padding-left: 1.6em
+}
+
+.post-content li{margin-bottom: var(--sp-1)}
+.post-content li > p{margin: 0 0 var(--sp-2)}
+.post-content del{color: var(--ink-3)}
+.post-content hr{
+    height: 0;
+    margin: var(--sp-5) 0;
+    border: 0;
+    border-top: 1px solid var(--line)
+}
+
+/* 表格列多时自己横向滚动，不把整页撑宽 */
+.post-content table{
+    display: block;
+    max-width: 100%;
+    overflow-x: auto
+}
+
 /* --- 回复面板 --- */
 .reply-panel{
     margin: 0;
@@ -3758,3 +3801,98 @@ table.list{
         background: #fff
     }
 }
+
+/* --- Markdown 编辑器（EasyMDE，app/assets/vendor/easymde）：贴合本站表单外观 --- */
+.markdown-field{display: grid; row-gap: 0; margin: 0 0 var(--sp-4)}
+.markdown-field > span{margin-bottom: var(--sp-2); color: var(--ink-3); font-size: var(--fs-sm)}
+.markdown-field > span > small{display: block}
+.markdown-field-compact{margin: 0}
+.markdown-field-compact > span{display: none}
+
+.markdown-field .EasyMDEContainer .editor-toolbar{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    padding: 2px;
+    border: 1px solid var(--line-strong);
+    border-bottom: 0;
+    border-radius: var(--r-md) var(--r-md) 0 0;
+    background: var(--surface-2);
+    opacity: 1
+}
+
+.markdown-field .EasyMDEContainer .editor-toolbar::before,
+.markdown-field .EasyMDEContainer .editor-toolbar::after{display: none}
+.markdown-field .EasyMDEContainer .editor-toolbar button{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 28px;
+    margin: 0;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--ink-3);
+    cursor: pointer
+}
+
+/* 图标由 JS 以内联 SVG 提供，隐藏 EasyMDE 预留的 Font Awesome 占位 */
+.markdown-field .EasyMDEContainer .editor-toolbar button i{display: none}
+.markdown-field .EasyMDEContainer .editor-toolbar button:hover,
+.markdown-field .EasyMDEContainer .editor-toolbar button:focus-visible{border-color: var(--line); background: var(--surface); color: var(--ink)}
+.markdown-field .EasyMDEContainer .editor-toolbar button.active{border-color: var(--brand-line); background: var(--brand-soft); color: var(--brand-strong)}
+.markdown-field .EasyMDEContainer .editor-toolbar i.separator{
+    width: 1px;
+    height: 20px;
+    margin: 0 4px;
+    border: 0;
+    border-left: 1px solid var(--line)
+}
+
+.markdown-field .EasyMDEContainer .editor-toolbar.fullscreen{
+    height: auto;
+    padding: 2px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface)
+}
+
+.markdown-field .EasyMDEContainer .CodeMirror{
+    height: auto;
+    min-height: 132px;
+    border: 1px solid var(--line-strong);
+    border-top: 0;
+    border-radius: 0 0 var(--r-md) var(--r-md);
+    background: var(--surface);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: var(--fs-lg)
+}
+
+.markdown-field .EasyMDEContainer .CodeMirror-scroll{min-height: 132px}
+.markdown-field .EasyMDEContainer .CodeMirror-lines{padding: var(--sp-3) 0}
+.markdown-field .EasyMDEContainer .CodeMirror pre.CodeMirror-line,
+.markdown-field .EasyMDEContainer .CodeMirror pre.CodeMirror-line-like{padding: 0 var(--sp-3); font-family: var(--font-sans); line-height: var(--lh-base)}
+.markdown-field .EasyMDEContainer .CodeMirror-focused{border-color: var(--brand); box-shadow: var(--focus-shadow)}
+.markdown-field .EasyMDEContainer .CodeMirror-cursor{border-left-color: var(--ink)}
+/* EasyMDE 自带的标题字号偏大，编辑区里按本站字号收敛一下 */
+.markdown-field .EasyMDEContainer .cm-header-1{font-size: 1.35em}
+.markdown-field .EasyMDEContainer .cm-header-2{font-size: 1.25em}
+.markdown-field .EasyMDEContainer .cm-header-3{font-size: 1.15em}
+.markdown-field .EasyMDEContainer .cm-header-4,
+.markdown-field .EasyMDEContainer .cm-header-5,
+.markdown-field .EasyMDEContainer .cm-header-6{font-size: 1.05em}
+.markdown-field .EasyMDEContainer .cm-header{font-weight: 600}
+.markdown-field .EasyMDEContainer .CodeMirror-fullscreen{border-radius: 0; background: var(--surface)}
+.markdown-field .EasyMDEContainer .editor-preview,
+.markdown-field .EasyMDEContainer .editor-preview-side{
+    padding: var(--sp-4);
+    border-color: var(--line-strong);
+    background: var(--surface)
+}
+
+.markdown-field .EasyMDEContainer .editor-preview{padding-bottom: var(--sp-5)}
+.markdown-field .EasyMDEContainer .editor-preview pre,
+.markdown-field .EasyMDEContainer .editor-preview-side pre{margin: var(--sp-3) 0}
+.editor-preview-empty{margin: 0; color: var(--ink-4); font-size: var(--fs-md)}

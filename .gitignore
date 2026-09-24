@@ -13,3 +13,4 @@ app/*
 .venv*
 .qoder
 docker/.env
+docker/.opcache.dev.ini

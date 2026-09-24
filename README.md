@@ -10,6 +10,7 @@
 - 页面地址按页面区分（`/login`、`/topic/12`），不使用查询参数选页
 - 包含首页、版块、主题、回帖、通知、个人主页和后台管理等完整论坛功能
 - 支持用户组、版块权限、站点设置、注册控制、发帖限制
+- 帖子正文按 Markdown 渲染（league/commonmark：标题、表格、列表、引用、代码块、删除线、裸链接自动识别，`@用户名` 与 `@用户名 #楼层` 自动变成提及链接），发帖与回帖使用 EasyMDE 编辑器（工具栏 + 预览，预览结果由后端同一渲染函数生成）
 - 无安装向导，首次访问按环境变量自动初始化，适配 Docker 一键部署
 - 站点设置、版块和用户组在请求内按需加载，数据库结构简单
 - 支持 AJAX 交互和响应式布局，兼顾 PC 与移动端使用体验
@@ -26,7 +27,7 @@
 | SQLite | SQLite 3 | 通过 `pdo_sqlite` 使用 |
 | Web 服务 | Nginx 或 Apache | Apache 需启用 PHP-FPM/模块及 URL 重写 |
 
-使用 Docker 部署还需要 Docker Engine 24 及以上和 Docker Compose v2。Docker 镜像基于 PHP fpm-alpine 和 Nginx Alpine；源码运行时以 PHP `8.2+` 为最低要求。
+使用 Docker 部署还需要 Docker Engine 24 及以上和 Docker Compose v2。运行镜像为 `serversideup/php:8.5-fpm` 与 `nginx:alpine`，本地开发与线上生产用同一套编排，环境一致性由 `docker/env-check.sh` 校验；源码运行时以 PHP `8.2+` 为最低要求。
 
 ## Docker 部署（推荐）
 
@@ -42,7 +43,7 @@ sudo sh install-docker.sh
 ```bash
 cd docker
 cp .env.example .env
-# 按需编辑 .env：站点名、管理员账号、端口
+# 按需编辑 .env：源码路径、端口、站点名、管理员账号
 docker compose up -d
 ```
 
@@ -52,28 +53,32 @@ docker compose up -d
 http://服务器地址:8080
 ```
 
-无需安装向导：首次访问时程序会按环境变量自动完成初始化（建表、默认版块、管理员账号），数据保存在 `forum_data` 数据卷中。管理员密码来自 `.env` 中的 `ADMIN_PASSWORD`；留空时自动生成随机密码，保存在数据卷 `app/data/admin-password.txt` 并打印到容器日志（`docker compose logs forum`）。
+无需安装向导：首次访问时程序会按环境变量自动完成初始化（建表、默认版块、管理员账号），数据保存在 `bbs1org_data` 数据卷中。管理员密码来自 `.env` 中的 `ADMIN_PASSWORD`；留空时自动生成随机密码，保存在数据卷 `app/data/admin-password.txt` 并打印到容器日志（`docker compose logs php`）。
 
-数据库固定使用 `SQLite`，数据文件保存在 `forum_data` 数据卷中。
+数据库固定使用 `SQLite`，数据文件保存在 `bbs1org_data` 数据卷中。
 
 常用操作（均在 `docker` 目录执行）：
 
 ```bash
 docker compose ps                 # 查看状态
-docker compose logs -f forum      # 查看日志
-docker compose restart            # 重启
+docker compose logs -f php        # 查看日志
+docker compose restart php        # 重启 php（改了 PHP 代码或 ini 之后）
+docker compose up -d --force-recreate   # 改了 nginx.conf / opcache.ini 之后（bind mount 按 inode，必须重建）
 docker compose down               # 停止并保留数据卷
 ```
+
+- 本地开发流程（含用线上数据联调）：[docs/DEV-LOCAL.md](docs/DEV-LOCAL.md)
+- 生产发布、回滚、备份与环境一致性校验：[docs/DEPLOY-PRODUCTION.md](docs/DEPLOY-PRODUCTION.md)
 
 ## 虚拟机部署（已有 Nginx/Apache + PHP 环境）
 
 环境要求：
 
-- PHP 8.1+
+- PHP 8.2+（开发与线上统一在 8.5；版本差异会用环境变量、扩展、ini 逐项比出来，见 `docker/env-check.sh`）
 - 启用 PDO 的 `pdo_sqlite` 扩展（SQLite 3）
 - 项目根目录执行 `composer install` 生成 `vendor/`（Twig 模板引擎 + Eloquent ORM）
 - Web 服务运行用户对 `app/data/` 有写入权限；使用 SQLite 时数据库文件也保存在该目录
-- **必须禁止 Web 直接访问 `app/data/`**，该目录包含数据库、配置和运行缓存；部署完成后请确认访问 `https://你的域名/app/data/` 返回 `403` 或 `404`
+- **必须禁止 Web 直接访问 `app/data/`、`app/optional/`、`vendor/`、`templates/`**，这些目录包含数据库、配置、依赖与模板；部署完成后请确认访问 `https://你的域名/app/data/db.php` 返回 `403` 或 `404`。`docker/nginx.conf` 是线上在用的规则，可作为站点配置的参考
 
 没有安装向导。程序在首次访问时按环境变量自动初始化；也可在 `app/data/db.php` 中手工写死数据库配置（存在时优先于环境变量）。可用的环境变量：
 
@@ -85,10 +90,17 @@ docker compose down               # 停止并保留数据卷
 | `ADMIN_EMAIL` | `admin@example.com` | 管理员邮箱 |
 | `ADMIN_PASSWORD` | 随机生成 | 留空时生成随机密码，保存到 `app/data/admin-password.txt` |
 
-Nginx 站点配置应包含：
+Nginx 站点配置应包含（与 `docker/nginx.conf` 一致的两组）：
 
 ```nginx
-location ~ ^/app/(?:data|cache|optional)(?:/|$) {
+location ~ ^/app/(?:data|cache|plugins|optional)(?:/|$) {
+    deny all;
+}
+# 依赖与模板里有可执行 PHP 与模板源码，不能让它们落到 php-fpm 或直接下载
+location ~ ^/(?:vendor|templates|docs)(?:/|$) {
+    deny all;
+}
+location ~ ^/app/.*\.php$ {
     deny all;
 }
 ```
@@ -97,7 +109,9 @@ Apache 可在网站根目录的 `.htaccess` 中加入：
 
 ```apache
 RewriteEngine On
-RewriteRule ^app/(data|cache|optional)(/|$) - [F,L]
+RewriteRule ^app/(data|cache|plugins|optional)(/|$) - [F,L]
+RewriteRule ^(vendor|templates|docs)(/|$) - [F,L]
+RewriteRule ^app/.*\.php$ - [F,L]
 ```
 
 页面地址形如 `/`、`/login`、`/topic/12`、`/admin?tab=groups`：路由名是路径首段，纯数字的第二段是 id，其余参数留在查询串上。**这要求 Web 服务把不存在的路径回落到 `index.php`**，否则所有内页都会 404。
@@ -130,6 +144,17 @@ RewriteRule ^ index.php [L,QSA]
 ## 面板部署
 
 宝塔和 1Panel 可在面板终端执行“Docker 部署”中的克隆、配置和启动命令。
+
+## 帖子正文与编辑器
+
+正文渲染和编辑器都直接用开源组件，不自研解析器：
+
+- 渲染：`league/commonmark`（`app/optional/Markdown.php`）。启用官方 CommonMark 核心 + GFM 表格 / 删除线 / 裸链接自动识别扩展，提及用官方 Mention 扩展实现，正文里的原始 HTML 一律转义输出、`javascript:` 之类的不安全链接不生成 `a` 标签。换行按“回车即换行”渲染成 `<br>`，与论坛原有书写习惯一致
+- 编辑器：EasyMDE（`app/assets/vendor/easymde/`，MIT，版本见随包 LICENSE），自带工具栏、快捷键、并排预览与全屏；图标以内联 SVG 提供，不依赖 Font Awesome CDN，也不请求任何外部域名
+- 预览：工具栏的“预览”把正文 POST 到 `/preview`，由后端调用同一个 `markdown_html()` 渲染后返回，所以预览结果与发出后的显示完全一致
+- 静态资源按需加载：只有含编辑器的页面（发帖、编辑主题/回复、可回帖的主题页）才引入 EasyMDE 的 CSS/JS
+
+`{{ body|markdown(topic_id) }}` 过滤器是正文渲染入口；模板里第二个参数是主题 id，楼层提及要它才能生成 `/topic/{id}?floor={n}` 链接。
 
 ## 数据层
 

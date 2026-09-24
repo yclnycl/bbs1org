@@ -1,0 +1,10 @@
+# 本地开发专用覆盖：只做一件事——把 opcache.validate_timestamps 打开，
+# 改完 PHP 代码立刻生效，不必每次重启容器。
+#
+# 生产沿用 docker/opcache.ini 的原值（validate_timestamps=0），所以这个差异是
+# 「本地唯一一处故意的不同」，且文件由 dev.sh 从 opcache.ini 派生（只改那一行），
+# 不会出现两份 ini 各自漂移。想验证生产行为时：dev.sh up --strict 跳过本覆盖。
+services:
+  php:
+    volumes:
+      - ./.opcache.dev.ini:/usr/local/etc/php/conf.d/zzz-opcache.ini:ro

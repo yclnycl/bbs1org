@@ -1,20 +1,73 @@
+# bbs1org 运行环境：本地开发与线上生产共用这一份编排。
+#
+# 环境一致性靠三件事保证，而不是靠人工同步：
+#   1. 不自行构建镜像，两边都用 serversideup/php:8.5-fpm（线上同款）与 nginx:alpine
+#   2. 配置直接挂载仓库里的文件（nginx.conf / opcache.ini），两边同一份
+#   3. 目录与数据卷同名同路径（app/data、app/upload、app/avatars、app/plugins）
+#
+# 本地与线上只有两处不同，且都不改变运行时行为：
+#   - .env 的 BBS1ORG_PATH：本地指向仓库目录，线上指向 releases/<版本>/bbs1org
+#   - .env 的 HTTP_PORT：本地默认 8080，线上由宿主 nginx 反代到 127.0.0.1:8080
+# 用 docker/env-check.sh 可以把两边的镜像、PHP、ini、配置逐项比对出来。
+name: ${COMPOSE_PROJECT_NAME:-bbs1org}
+
+x-php: &php
+  image: serversideup/php:8.5-fpm
+  working_dir: /var/www/html
+  environment:
+    # 与线上容器一致：opcache 由挂载的 zzz-opcache.ini 决定，这里只保留线上声明过的开关
+    PHP_OPCACHE_ENABLE: "1"
+    PHP_DATE_TIMEZONE: "UTC"
+    PHP_MEMORY_LIMIT: "256M"
+    PHP_MAX_EXECUTION_TIME: "99"
+    PHP_DISPLAY_ERRORS: "Off"
+    PHP_ERROR_LOG: "/dev/stderr"
+    # 首次初始化时生效（app/data/install.lock 不存在的那一次请求），之后以库里的站点设置为准
+    SITE_NAME: ${SITE_NAME:-我的论坛}
+    FORUM_NAME: ${FORUM_NAME:-默认版块}
+    ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+    ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+    ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+  volumes:
+    - ${BBS1ORG_PATH:-..}:/var/www/html:rw
+    - data:/var/www/html/app/data
+    - avatars:/var/www/html/app/avatars
+    - upload:/var/www/html/app/upload
+    - plugins:/var/www/html/app/plugins
+    - ./opcache.ini:/usr/local/etc/php/conf.d/zzz-opcache.ini:ro
+
 services:
-  forum:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-    image: forum:latest
-    ports:
-      - "${FORUM_PORT:-8080}:8080"
-    environment:
-      SITE_NAME: ${SITE_NAME:-FORUM}
-      FORUM_NAME: ${FORUM_NAME:-默认版块}
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
-    volumes:
-      - forum_data:/app/app/data
+  # 一次性容器：把源码目录与数据卷的属主统一成 www-data 后退出。
+  # 线上与本地都会跑，php 服务等它成功退出才启动。
+  permissions:
+    <<: *php
+    user: "0:0"
+    entrypoint: ["sh", "-ec", "chown -R www-data:www-data /var/www/html/app && chown root:www-data /var/www/html && chmod 775 /var/www/html"]
+
+  php:
+    <<: *php
     restart: unless-stopped
+    depends_on:
+      permissions:
+        condition: service_completed_successfully
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      - php
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    volumes:
+      - ${BBS1ORG_PATH:-..}:/var/www/html:ro
+      - avatars:/var/www/html/app/avatars:ro
+      - upload:/var/www/html/app/upload:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
 
 volumes:
-  forum_data:
+  data:
+  avatars:
+  upload:
+  # 旧版应用的插件目录：新版不使用，保留是为了与线上现有部署（bbs1org_plugins）同名同卷，
+  # 切换与回滚时不用动数据。
+  plugins:

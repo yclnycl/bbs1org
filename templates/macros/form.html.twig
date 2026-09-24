@@ -25,6 +25,18 @@
 <label class="grid{{ class|default('') != '' ? ' ' ~ class : '' }}">{{ _self.caption(label, help|default('')) }}<textarea name="{{ name }}"{{ _self.length_attrs(name)|raw }}{{ required ? ' required' : '' }}>{{ value }}</textarea></label>
 {%- endmacro %}
 
+{#
+    Markdown 编辑器：这里只输出带 data-markdown-editor 标记的文本域，
+    工具条/预览由前端的开源编辑器 EasyMDE 接管（app/assets/vendor/easymde）。
+    compact 用于帖子页底部的回帖框，标题说明整行显示。
+#}
+{% macro markdown_editor(label, name, value, required, compact, placeholder) %}
+<div class="markdown-field{{ compact|default(false) ? ' markdown-field-compact' : '' }}">
+    {{ _self.caption(label, '支持 Markdown：**粗体**、## 标题、- 列表、> 引用、| 表格 |') }}
+    <textarea name="{{ name }}" data-markdown-editor data-preview-url="{{ route_url('preview') }}" placeholder="{{ placeholder|default('支持 Markdown 语法，可用工具栏插入格式') }}"{{ _self.length_attrs(name)|raw }}{{ required ? ' required data-markdown-required' : '' }}>{{ value }}</textarea>
+</div>
+{%- endmacro %}
+
 {% macro checkbox(label, name, checked, help, class) %}
 <label class="grid{{ class|default('') != '' ? ' ' ~ class : '' }}">{{ _self.caption(label, help|default('')) }}<input type="checkbox" name="{{ name }}" value="1"{{ checked ? ' checked' : '' }}></label>
 {%- endmacro %}

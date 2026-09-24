@@ -80,27 +80,30 @@ cd bbs1org/docker
 # 1. 看两边差在哪（首次切换时必然有 7 项差异，都属于「新版还没上线」导致的，见下表）
 ./env-check.sh
 
-# 2. 选个低峰时段，发布（--sync-images 会把本地镜像推到服务器，保证两边同一份 PHP）
-./deploy.sh release --sync-images
+# 2. 选个低峰时段，发布（镜像不一致时脚本会让两边各自 docker pull 对齐，不从本地上传）
+./deploy.sh release
 ```
 
 首次切换前 `env-check.sh` 会报 7 项差异，逐条对应关系如下（发布后应全部消失）：
 
 | 差异项 | 原因 | 消除方式 |
 | --- | --- | --- |
-| `serversideup/php:8.5-fpm`、PHP 版本 8.5.10 vs 8.5.9 | 线上镜像 8 月拉取后仓库有补丁更新 | `--sync-images` 推送本地镜像 |
+| `serversideup/php:8.5-fpm`、PHP 版本 8.5.10 vs 8.5.9 | 线上镜像 8 月拉取后仓库有补丁更新 | 脚本让两边各拉一次同一个 tag（`docker compose pull`） |
 | `nginx:alpine` | 同上 | 同上 |
 | 容器内/部署目录的 `nginx.conf` | 线上还是旧版应用的规则，没有 `/vendor`、`/templates` 拦截 | 发布时同步新配置 |
 | `composer.lock`、`vendor` | 线上旧版应用没有 Composer 依赖 | 发布时带上 `vendor/` |
 
 推进真正写入的是发布脚本，不是这个校验；发布完成后必须再跑一次，那时应当是「一致」。
 
+> 服务器拉不到 Docker 仓库时（内网、镜像站不可用），加 `--sync-images`：脚本改用
+> `docker save | docker load` 把本地镜像推过去，以本地这份为准，代价是走上传带宽。
+
 `release` 依次做这些事，任何一步失败都会中止并保留现场：
 
 | 步骤 | 动作 |
 | --- | --- |
 | 0 | 前置检查：ssh、目标机 docker、本地冒烟、工作区改动提示 |
-| 1 | 镜像对齐：两边镜像 ID 不同就报错，`--sync-images` 时用 `docker save \| docker load` 推过去 |
+| 1 | 镜像对齐：两边镜像 ID 不同就让各自 `docker pull` 同一个 tag（`--sync-images` 时改为把本地镜像推过去） |
 | 2 | 备份：`VACUUM INTO` 快照线上库到 `backups/db-<时间戳>.sqlite`；`cp -a` 现有 `bbs1org_docker` 到 `backups/<时间戳>/` |
 | 3 | 上传：`tar` 打包工作树（含 `vendor/`，服务器不必联外网）解到 `releases/<时间戳>/` |
 | 4 | 同步配置：`docker-compose.yml`、`nginx.conf`、`opcache.ini` 覆盖到 `bbs1org_docker/`；`.env` 的 `BBS1ORG_PATH` 指向新版本 |
@@ -133,7 +136,7 @@ cd bbs1org/docker
 cd bbs1org/docker
 ./dev.sh up                 # 本地改完先在开发栈验证
 ./dev.sh smoke
-./deploy.sh release         # 镜像没变时加 --sync-images 会提示「本机就是目标机」或直接跳过
+./deploy.sh release         # 镜像不一致时脚本自动让两边各拉一次，不需要人工介入
 ```
 
 几个必须知道的点：
@@ -189,7 +192,7 @@ cd bbs1org/docker
 与仓库文件是否同一份、`composer.lock`、应用版本、`vendor` 是否就位、`app/data` 可写。
 
 判定：全部必须一致，只有 `opcache.validate_timestamps` 允许不同（本地 1 = 改代码立即生效，线上 0 = 靠重启生效）。
-有差异时脚本会打印两条对齐命令：本地 `docker compose pull`，线上 `docker compose pull`（或发布时 `--sync-images` 推镜像）。
+有差异时脚本会打印两条对齐命令：本地 `docker compose pull`、线上 `docker compose pull`；直接跑一次 `./deploy.sh release` 也会自动对齐。
 
 ---
 

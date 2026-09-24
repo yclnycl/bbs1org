@@ -2,6 +2,7 @@
 # 生产发布脚本：在开发机上执行，通过 ssh 操作服务器（--host local 时在本机演练）。
 #
 #   ./deploy.sh status                 # 看线上容器状态与最近日志
+#   ./deploy.sh health                 # 只跑一遍健康检查（发布后复核用）
 #   ./deploy.sh db-backup              # 备份线上 SQLite（VACUUM INTO，可在线做）
 #   ./deploy.sh release                # 发布：备份 → 打包 → 上传 → 同步配置 → 重建 → 健康检查
 #   ./deploy.sh rollback               # 回滚到上一个版本（配置与源码指针都还原）
@@ -12,7 +13,8 @@
 #   --dir <部署根>   默认 /opt/bbs1org-deploy，内含 bbs1org_docker/、releases/、backups/
 #   --project <名>   compose 项目名，决定数据卷前缀，默认 bbs1org
 #   --port <端口>    nginx 对外端口，默认 8080
-#   --sync-images    两边镜像 ID 不一致时，用 docker save | docker load 把本地镜像推过去
+#   --sync-images    镜像不一致时默认让两边各自 docker pull 对齐；加这个参数改成把本地镜像推过去
+#                    （目标机拉不到仓库时才用，会占用上传带宽）
 #   --skip-checks    跳过本地冒烟与环境校验
 #   --dry-run        只打印将要执行的命令，不改任何东西
 set -eu
@@ -34,6 +36,8 @@ CMD=
 STAMP=$(date +%Y%m%d-%H%M%S)
 SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=15"
 
+usage() { awk 'NR > 1 && /^set -eu/ { exit } NR > 1 { print }' "$0"; }
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --host) HOST="$2"; shift 2 ;;
@@ -44,7 +48,7 @@ while [ $# -gt 0 ]; do
         --skip-checks) SKIP_CHECKS=1; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
         --restore-db) RESTORE_DB="$2"; shift 2 ;;
-        -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+        -h|--help) usage; exit 0 ;;
         *) CMD="$1"; shift ;;
     esac
 done
@@ -95,10 +99,18 @@ do_db_backup() { # 发布前/手动：把线上库快照到部署目录的 backu
         echo "  [dry-run] VACUUM INTO + cp 出容器"
         return 0
     fi
-    dcx "exec -T php php /var/www/html/docker/db-backup.php /var/www/html/app/data/publish-backup-$STAMP.sqlite"
+    target="/var/www/html/app/data/publish-backup-$STAMP.sqlite"
+    # 发布目录里已经有 db-backup.php 就直接用；第一次切换时线上还是旧版应用，从本地塞一份到 /tmp
+    if run "docker exec $ctr test -f /var/www/html/docker/db-backup.php"; then
+        dcx "exec -T php php /var/www/html/docker/db-backup.php $target"
+    else
+        echo "  线上还没有这个脚本（首次发布），从本地塞进容器执行"
+        run "docker exec -i $ctr sh -c 'cat > /tmp/db-backup.php'" < db-backup.php
+        run "docker exec -e APP_ROOT=/var/www/html $ctr php /tmp/db-backup.php $target"
+    fi
     run "mkdir -p '$DEPLOY_DIR/backups'"
-    dcx "cp php:/var/www/html/app/data/publish-backup-$STAMP.sqlite '$DEPLOY_DIR/backups/db-$STAMP.sqlite'"
-    dcx "exec -T php rm -f /var/www/html/app/data/publish-backup-$STAMP.sqlite"
+    dcx "cp php:$target '$DEPLOY_DIR/backups/db-$STAMP.sqlite'"
+    dcx "exec -T php rm -f $target"
     echo "  已保存：$DEPLOY_DIR/backups/db-$STAMP.sqlite"
 }
 
@@ -121,17 +133,33 @@ check_images() {
             echo "  一致  $image"
             continue
         fi
-        [ "$SYNC_IMAGES" -eq 1 ] || fail "镜像不一致：$image（本地 ${local_id#sha256:} / 目标 ${remote_id#sha256:}）
-  两边跑同一份镜像，环境才算一致。二选一：
-    1) 本次顺带推送：./deploy.sh $CMD --sync-images
-    2) 让目标机自己拉：ssh $HOST 'cd $DOCKER_DIR && docker compose pull'，再在本地 docker compose pull 对齐"
-        say "推送本地镜像到目标机：$image"
+        if [ "$SYNC_IMAGES" -eq 1 ]; then
+            # 兜底路径：目标机拉不到仓库（内网/离线）时，把本地镜像传过去
+            say "推送本地镜像到目标机：$image"
+            if [ "$DRY_RUN" -eq 1 ]; then
+                echo "  [dry-run] docker save $image | (目标机) docker load"
+            elif [ "$HOST" = local ]; then
+                echo "  本机就是目标机，无需传输"
+            else
+                docker save "$image" | run "docker load"
+            fi
+            continue
+        fi
+        # 默认路径：让两边各自从仓库拉同一个 tag，不产生本地上传流量
+        say "镜像不一致，两边各拉一次对齐：$image"
         if [ "$DRY_RUN" -eq 1 ]; then
-            echo "  [dry-run] docker save $image | (目标机) docker load"
-        elif [ "$HOST" = local ]; then
-            echo "  本机就是目标机，无需传输"
+            echo "  [dry-run] 目标机 docker pull + 本地 docker pull"
+            continue
+        fi
+        run "docker pull '$image' >/dev/null" || fail "目标机拉取 $image 失败；离线环境可改用 ./deploy.sh $CMD --sync-images"
+        docker pull "$image" >/dev/null || fail "本地拉取 $image 失败"
+        local_id=$(docker image inspect "$image" --format '{{.Id}}' 2>/dev/null || echo missing)
+        remote_id=$(run "docker image inspect '$image' --format '{{.Id}}' 2>/dev/null || echo missing")
+        if [ "$local_id" = "$remote_id" ]; then
+            echo "  已对齐  $image"
         else
-            docker save "$image" | run "docker load"
+            fail "两次拉取仍不一致：$image（本地 ${local_id#sha256:} / 目标 ${remote_id#sha256:}）
+  tag 在这期间被更新过。重跑一次即可；或离线发布用 --sync-images 以本地这份为准。"
         fi
     done
 }
@@ -251,6 +279,10 @@ case "$CMD" in
         dcx "logs --tail=30 php" || true
         ;;
 
+    health)
+        health_check || exit 1
+        ;;
+
     db-backup)
         do_db_backup
         ;;
@@ -321,7 +353,7 @@ case "$CMD" in
         ;;
 
     *)
-        sed -n '2,18p' "$0"
+        usage
         exit 2
         ;;
 esac

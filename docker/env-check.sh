@@ -50,12 +50,17 @@ snapshot_local() {
 }
 
 snapshot_remote() {
-    # 优先用发布目录里已经带过去的脚本；线上还没有这个文件时，从本地塞一份到 /tmp 再跑
-    if remote_ctr php "php /var/www/html/docker/env-snapshot.php" 2>/dev/null | grep -q '^php_version='; then
-        return 0
-    fi
+    # 优先用发布目录里已经带过去的脚本；线上还没有这个文件（第一次发布之前）时，
+    # 从本地塞一份到 /tmp 再跑。第一个分支必须把结果打印出来，不能只判断成不成功。
+    out=$(remote_ctr php "php /var/www/html/docker/env-snapshot.php" 2>/dev/null || true)
+    case "$out" in
+        php_version=*)
+            printf '%s\n' "$out"
+            return 0
+            ;;
+    esac
     $SSH "c=\$(docker ps -q -f label=com.docker.compose.project=$PROJECT -f label=com.docker.compose.service=php | head -1)
-          docker exec -i \$c sh -c 'cat > /tmp/env-snapshot.php' && APP_ROOT=/var/www/html docker exec -i -e APP_ROOT=/var/www/html \$c php /tmp/env-snapshot.php" < env-snapshot.php
+          docker exec -i \$c sh -c 'cat > /tmp/env-snapshot.php' && docker exec -i -e APP_ROOT=/var/www/html \$c php /tmp/env-snapshot.php" < env-snapshot.php
 }
 
 value_of() { [ -f "$1" ] && sed -n "s/^$2=//p" "$1" | head -1 || true; }

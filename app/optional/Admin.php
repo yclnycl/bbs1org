@@ -27,7 +27,7 @@ final class Admin
         $values = ['site_name' => $site_name, 'site_base_url' => clean_site_base_url((string)($_POST['site_base_url'] ?? '')), 'pinned_topic_ids' => preg_replace('/[^\d,]/', '', (string)($_POST['pinned_topic_ids'] ?? '')) ?: '', 'default_group_id' => (string)$gid];
         foreach (['site_name_title', 'site_keywords'] as $key) $values[$key] = post($key, DB_STRING_MAX_LENGTH);
         $values['site_description'] = post('site_description', DB_TEXT_MAX_LENGTH);
-        foreach (['site_closed', 'debug_mode', 'pretty_url', 'allow_register'] as $key) $values[$key] = isset($_POST[$key]) ? '1' : '0';
+        foreach (['site_closed', 'debug_mode', 'allow_register'] as $key) $values[$key] = isset($_POST[$key]) ? '1' : '0';
         foreach (['pc_nav_forum_count' => [0, 20, 6], 'topics_per_page' => [1, 200, 30], 'replies_per_page' => [1, 200, 50], 'max_pagination_pages' => [1, 1000, 50], 'post_interval_seconds' => [0, 3600, 5]] as $key => [$min, $max, $default]) $values[$key] = (string)min($max, max($min, (int)($_POST[$key] ?? $default)));
         $length_fields = [
             'username' => [1, DB_STRING_MAX_LENGTH, DB_STRING_MAX_LENGTH], 'email' => [0, DB_STRING_MAX_LENGTH, DB_STRING_MAX_LENGTH],
@@ -121,7 +121,7 @@ final class Admin
             'topic_body_min_length' => ['label' => '主题内容最小长度', 'type' => 'number', 'min' => 0, 'max' => DB_TEXT_MAX_LENGTH], 'topic_body_max_length' => ['label' => '主题内容最大长度', 'type' => 'number', 'min' => 0, 'max' => DB_TEXT_MAX_LENGTH],
             'reply_body_min_length' => ['label' => '回帖内容最小长度', 'type' => 'number', 'min' => 0, 'max' => DB_TEXT_MAX_LENGTH], 'reply_body_max_length' => ['label' => '回帖内容最大长度', 'type' => 'number', 'min' => 0, 'max' => DB_TEXT_MAX_LENGTH],
             'excerpt_length' => ['label' => '摘要长度', 'type' => 'number', 'min' => 0, 'max' => DB_TEXT_MAX_LENGTH],
-            'pretty_url' => ['label' => '是否开启rewrite', 'type' => 'checkbox'], 'site_closed' => ['label' => '是否关闭站点进行维护', 'type' => 'checkbox'], 'debug_mode' => ['label' => 'Debug模式', 'type' => 'checkbox'],
+            'site_closed' => ['label' => '是否关闭站点进行维护', 'type' => 'checkbox'], 'debug_mode' => ['label' => 'Debug模式', 'type' => 'checkbox'],
             'allow_register' => ['label' => '是否允许注册', 'type' => 'checkbox'], 'default_group_id' => ['label' => '新用户默认用户组', 'type' => 'select', 'options' => array_column(groups_cache(), 'name', 'id')], 'post_interval_seconds' => ['label' => '发帖/回复间隔（秒）', 'type' => 'number', 'min' => 0, 'max' => 3600, 'help' => '发帖/回复间隔设置为 0 可关闭限制，默认 5 秒一次。'],
         ];
         return [

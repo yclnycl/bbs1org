@@ -779,24 +779,16 @@ function append_url_query(string $url, array $params): string
     if (!$query) return $url;
     return $url . (str_contains($url, '?') ? '&' : '?') . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
 }
-function index_url(array $params = []): string
-{
-    return append_url_query(app_url('index.php'), $params);
-}
 function admin_url(array $params = []): string
 {
     return route_url('admin', $params);
 }
+/** 路由名即路径首段：home 是站点根，其余形如 /topic/12、/admin?tab=groups */
 function route_url(string $a = 'home', array $params = []): string
 {
-    if (setting('pretty_url', '0') !== '1') return $a === 'home' ? index_url($params) : index_url(['a' => $a] + $params);
+    unset($params['a']);
     if ($a === 'home') return $params ? append_url_query(app_url(''), $params) : app_url();
-    $params = $a === 'home' ? $params : ['a' => $a] + $params;
-    $segments = [];
-    if (isset($params['a']) && $params['a'] !== '') {
-        $segments[] = rawurlencode((string)$params['a']);
-        unset($params['a']);
-    }
+    $segments = [rawurlencode($a)];
     if (isset($params['id']) && ctype_digit((string)$params['id'])) {
         $segments[] = rawurlencode((string)$params['id']);
         unset($params['id']);
@@ -975,7 +967,7 @@ function twig(bool $cache = true): Twig\Environment
         'auto_reload' => true,
     ]);
     // 模板里只保留「取数据」的函数，页面标记一律由 templates/macros 下的宏负责
-    foreach (['route_url', 'index_url', 'admin_url', 'asset_url', 'app_url', 'human_time', 'flash_json'] as $fn) $env->addFunction(new Twig\TwigFunction($fn, $fn, ['is_safe' => ['html']]));
+    foreach (['route_url', 'admin_url', 'asset_url', 'app_url', 'human_time', 'flash_json'] as $fn) $env->addFunction(new Twig\TwigFunction($fn, $fn, ['is_safe' => ['html']]));
     foreach (['setting', 'csrf_token', 'uid', 'me', 'group_by_id', 'can_manage', 'can_speak', 'can_access_admin', 'is_super_user', 'can_manage_topic', 'can_manage_reply', 'notification_excerpt', 'excerpt_length', 'notification_link', 'length_limits', 'max_pagination_pages', 'append_url_query', 'post_forum_options', 'admin_tabs'] as $fn) $env->addFunction(new Twig\TwigFunction($fn, $fn));
     // 正文是富文本渲染（Markdown 子集 + 提及/楼层链接），属于文本转换而非页面结构，保留为过滤器
     $env->addFilter(new Twig\TwigFilter('markdown', markdown_html(...), ['is_safe' => ['html']]));

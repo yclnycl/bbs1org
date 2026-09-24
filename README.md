@@ -7,6 +7,7 @@
 - 页面渲染基于 Twig 3 模板（templates/ 目录，自动转义、模板缓存），路由函数只负责准备数据
 - 数据访问统一走 Eloquent ORM，模型与关联集中在 `app/optional/Model/`，业务代码里没有手写 SQL
 - 使用 SQLite 数据库，备份即复制文件
+- 页面地址按页面区分（`/login`、`/topic/12`），不使用查询参数选页
 - 包含首页、版块、主题、回帖、通知、个人主页和后台管理等完整论坛功能
 - 支持用户组、版块权限、站点设置、注册控制、发帖限制
 - 无安装向导，首次访问按环境变量自动初始化，适配 Docker 一键部署
@@ -99,7 +100,9 @@ RewriteEngine On
 RewriteRule ^app/(data|cache|optional)(/|$) - [F,L]
 ```
 
-启用伪静态（Rewrite）时，Nginx 在站点配置中使用：
+页面地址形如 `/`、`/login`、`/topic/12`、`/admin?tab=groups`：路由名是路径首段，纯数字的第二段是 id，其余参数留在查询串上。**这要求 Web 服务把不存在的路径回落到 `index.php`**，否则所有内页都会 404。
+
+Nginx 站点配置必须包含：
 
 ```nginx
 location / {
@@ -107,7 +110,7 @@ location / {
 }
 ```
 
-Apache 在启用 `mod_rewrite` 且允许 `.htaccess`（`AllowOverride FileInfo` 或 `All`）后，在网站根目录 `.htaccess` 中追加：
+Apache 必须启用 `mod_rewrite` 且允许 `.htaccess`（`AllowOverride FileInfo` 或 `All`），在网站根目录 `.htaccess` 中：
 
 ```apache
 RewriteEngine On
@@ -115,6 +118,10 @@ RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.php [L,QSA]
 ```
+
+回落到 `index.php` 的前提是路径没有对应的真实文件，所以**新增路由名时不要与网站根目录下的真实文件或目录重名**（例如 `app`、`docker`、`vendor`、`templates`），否则请求会被 Web 服务直接处理，不会进入程序。
+
+旧式的 `index.php?a=topic&id=12` 仍然可用（仅作为兼容，程序生成的都是路径形式）；这些地址的 `<link rel="canonical">` 指向对应的路径形式。
 
 - 下载源码后解压，将目录内全部文件上传到网站目录，确保 `index.php` 位于网站根目录。
 - 按上面的环境变量表设置 PHP 进程的环境变量（不设置则使用 SQLite 与默认管理员账号，随机密码见 `app/data/admin-password.txt`）。

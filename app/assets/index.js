@@ -18,28 +18,6 @@ const formActionUrl = (form) => {
     return window.location.href;
 };
 window.formActionUrl = formActionUrl;
-const filterLocalPlugins = e => {
-    const input = e.target instanceof HTMLInputElement && e.target.matches("[data-plugin-local-search]") ? e.target : null;
-    if (!input) return;
-    const panel = input.closest(".plugin-list-panel");
-    const list = panel?.querySelector("[data-plugin-local-list]");
-    if (!list) return;
-    const query = input.value.trim().toLocaleLowerCase();
-    let matches = 0;
-    list.querySelectorAll("[data-plugin-local-search-text]").forEach(item => {
-        const matched = query === "" || (item.dataset.pluginLocalSearchText || "").toLocaleLowerCase().includes(query);
-        item.hidden = !matched;
-        item.classList.toggle("is-hidden", !matched);
-        if (matched) matches++;
-    });
-    const empty = list.querySelector("[data-plugin-local-empty]");
-    if (empty) {
-        empty.hidden = matches > 0;
-        empty.classList.toggle("is-hidden", matches > 0);
-    }
-};
-document.addEventListener("input", filterLocalPlugins);
-document.addEventListener("search", filterLocalPlugins);
 const markButtonPending = button => {
     if (!button) return;
     button.classList.add("is-click-pending");
@@ -175,58 +153,6 @@ const openConfirm = (message, title = "确认操作") => _openModalBox(title, fa
     box.append(text, actions);
     return cancel;
 });
-document.addEventListener("click", e => {
-    const button = e.target.closest("[data-plugin-upload-open]");
-    if (!button) return;
-    const template = document.querySelector("[data-plugin-upload-template]");
-    if (!template) return;
-    openModal("插件上传", template.innerHTML);
-    modalBody?.querySelector("[data-plugin-upload-file]")?.focus();
-});
-const openPluginUninstallConfirm = (message, title = "卸载插件") => _openModalBox(title, false, (box, cancel, ok) => {
-    box.className = "confirm-box";
-    const text = document.createElement("p");
-    text.className = "confirm-message";
-    text.textContent = message;
-    const option = document.createElement("label");
-    option.className = "confirm-check";
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = true;
-    const labelText = document.createElement("span");
-    labelText.textContent = "保留插件数据";
-    option.append(checkbox, labelText);
-    const actions = document.createElement("div");
-    actions.className = "confirm-actions";
-    cancel.addEventListener("click", () => finishConfirm(false));
-    ok.textContent = "卸载";
-    ok.addEventListener("click", () => finishConfirm({keepData: checkbox.checked}));
-    actions.append(cancel, ok);
-    box.append(text, option, actions);
-    return checkbox;
-});
-const openPluginMarketInstallConfirm = (message, action = "安装") => _openModalBox(action + "插件", false, (box, cancel, ok) => {
-    box.className = "confirm-box";
-    const text = document.createElement("p");
-    text.className = "confirm-message";
-    text.textContent = message;
-    const option = document.createElement("label");
-    option.className = "confirm-check";
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = true;
-    const labelText = document.createElement("span");
-    labelText.textContent = "自动启用插件";
-    option.append(checkbox, labelText);
-    const actions = document.createElement("div");
-    actions.className = "confirm-actions";
-    cancel.addEventListener("click", () => finishConfirm(false));
-    ok.textContent = action;
-    ok.addEventListener("click", () => finishConfirm({autoEnable: checkbox.checked}));
-    actions.append(cancel, ok);
-    box.append(text, option, actions);
-    return checkbox;
-});
 const openPrompt = (message, title = "请输入", value = "1") => _openModalBox(title, null, (box, cancel, ok) => {
     box.className = "confirm-box prompt-box";
     const text = document.createElement("p");
@@ -276,24 +202,6 @@ const runPageFlash = () => {
 };
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", runPageFlash);
 else runPageFlash();
-const runSettingsUpdateCheck = () => {
-    const marker = document.querySelector("[data-settings-update-check-url]");
-    if (!marker) return;
-    fetch(marker.dataset.settingsUpdateCheckUrl || "index.php?a=update&notice_check=1", {
-        credentials: "same-origin",
-        headers: {"Accept": "application/json", "X-Requested-With": "XMLHttpRequest"},
-    }).then(response => response.json()).then(data => {
-        const title = document.querySelector("[data-update-tool-title]");
-        if (!data?.update_available || !title || title.querySelector(".settings-update-dot")) return;
-        const dot = document.createElement("i");
-        dot.className = "settings-update-dot";
-        dot.title = "发现新版本";
-        dot.setAttribute("aria-label", "发现新版本");
-        title.appendChild(dot);
-    }).catch(() => {});
-};
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", runSettingsUpdateCheck);
-else runSettingsUpdateCheck();
 const initTabBarWrap = () => {
     const bars = Array.from(document.querySelectorAll(".tab-bar"));
     if (!bars.length) return;
@@ -575,46 +483,16 @@ document.addEventListener("submit", async e => {
         e.target.submit();
         return;
     }
-    if (e.target?.dataset?.pluginUninstall === "1") {
+    const confirmMessage = e.submitter?.dataset?.confirm || e.target?.dataset?.confirm || "";
+    if (confirmMessage) {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        const result = await openPluginUninstallConfirm(e.target.dataset.confirm || "确定卸载插件？");
-        if (!result) return;
-        let input = e.target.elements?.keep_plugin_data;
-        if (!input) {
-            input = document.createElement("input");
-            input.type = "hidden";
-            input.name = "keep_plugin_data";
-            e.target.appendChild(input);
-        }
-        input.value = result.keepData ? "1" : "0";
-    } else if (e.target?.dataset?.pluginMarketInstall === "1") {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        const result = await openPluginMarketInstallConfirm(e.target.dataset.confirm || "确定安装插件？", e.target.dataset.pluginMarketAction || "安装");
-        if (!result) return;
-        let input = e.target.elements?.auto_enable;
-        if (!input) {
-            input = document.createElement("input");
-            input.type = "hidden";
-            input.name = "auto_enable";
-            e.target.appendChild(input);
-        }
-        input.value = result.autoEnable ? "1" : "0";
-    } else {
-        const confirmMessage = e.submitter?.dataset?.confirm || e.target?.dataset?.confirm || "";
-        if (confirmMessage) {
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            if (!await openConfirm(confirmMessage)) return;
-            if (e.target?.dataset?.noAjax === "1") {
-                markButtonPending(e.submitter || e.target.querySelector("button[type=submit],button:not([type]),input[type=submit]"));
-                e.target.submit();
-                return;
-            }
+        if (!await openConfirm(confirmMessage)) return;
+        if (e.target?.dataset?.noAjax === "1") {
+            markButtonPending(e.submitter || e.target.querySelector("button[type=submit],button:not([type]),input[type=submit]"));
+            e.target.submit();
+            return;
         }
     }
     const replyForm = e.target.closest(".ajax-reply-form");
@@ -794,11 +672,6 @@ document.addEventListener("submit", async e => {
     }
 });
 window.addEventListener("load", () => {
-    const shareForm = document.querySelector("form[data-plugin-share-auto='1']");
-    if (shareForm) {
-        shareForm.submit();
-        return;
-    }
     const replyId = new URLSearchParams(window.location.search).get("replyid") || "";
     const floor = new URLSearchParams(window.location.search).get("floor") || "";
     const target = /^\d+$/.test(replyId) ? document.getElementById("post-" + replyId) : (/^\d+$/.test(floor) ? document.querySelector('[data-floor="' + floor + '"]') : null);

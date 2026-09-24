@@ -8,7 +8,6 @@
 - 支持 SQLite、MySQL 和 PostgreSQL，数据库结构和搜索能力保持跨引擎兼容
 - 包含首页、版块、主题、回帖、收藏、个人主页和后台管理等完整论坛功能
 - 支持用户组、版块权限、站点设置、注册控制、发帖限制和附件管理
-- 插件机制支持 Hook、路由、后台页面、资源合并、在线安装更新和统一计划任务
 - 站点设置、版块和用户组按需懒加载，数据库结构简单，负载能力强
 - 支持 AJAX 交互和响应式布局，兼顾 PC 与移动端使用体验
 
@@ -97,7 +96,7 @@ docker compose down               # 停止并保留数据卷
 Nginx 站点配置应包含：
 
 ```nginx
-location ~ ^/app/(?:data|cache|plugins|optional)(?:/|$) {
+location ~ ^/app/(?:data|cache|optional)(?:/|$) {
     deny all;
 }
 ```
@@ -106,7 +105,7 @@ Apache 可在网站根目录的 `.htaccess` 中加入：
 
 ```apache
 RewriteEngine On
-RewriteRule ^app/(data|cache|plugins|optional)(/|$) - [F,L]
+RewriteRule ^app/(data|cache|optional)(/|$) - [F,L]
 ```
 
 启用伪静态（Rewrite）时，Nginx 在站点配置中使用：
@@ -129,28 +128,17 @@ RewriteRule ^ index.php [L,QSA]
 - 打开 [源码下载](https://bbs1.org/plugin_market_source)，下载 `bbs1org.zip`。
 - 解压 ZIP，将该目录内的全部文件上传到网站目录，确保 `index.php` 位于网站根目录。
 - 访问站点域名，根据指示进行安装即可。
-- 使用第三方服务 (比如: cron-job.org) 定时请求服务，启用定时任务。
-每分钟以 `GET` 方式访问：`https://你的域名/index.php?a=cron`
 
 ## 面板部署
 
 宝塔和 1Panel 可在面板终端执行“Docker 源码部署”中的下载、解压和启动命令。
 
-## 在线升级
-
-在后台设置底部点击“升级”。检测更新时只读取源码下载入口的 `bbs1org.json`，确认升级后才下载所选文件。升级前请先备份数据库、附件、头像和插件目录。
-
 ## 数据库转换和迁移
 
-先在新数据库完成安装并登录管理员账号，再从升级页进入“数据迁入”，或访问 `index.php?a=migrate`。选择旧数据库类型并填写连接信息，程序会迁入旧库的全部普通数据表；当前库没有的表会自动复制字段、主键和索引后再导入数据，同名表则清空后替换，并保留原 ID。
+先在新数据库完成安装并登录管理员账号，再访问 `index.php?a=migrate` 进入“数据迁入”。选择旧数据库类型并填写连接信息，程序会迁入旧库的全部普通数据表；当前库没有的表会自动复制字段、主键和索引后再导入数据，同名表则清空后替换，并保留原 ID。
 
-插件数据表会一并迁入。附件、头像和插件程序文件不在数据库中，需要另外复制 `app/upload/`、`app/avatars/` 和 `app/plugins/`。迁移前请备份新旧数据库。
+附件、头像文件不在数据库中，需要另外复制 `app/upload/` 和 `app/avatars/`。迁移前请备份新旧数据库。
 
 ## 数据备份
 
-SQLite数据目录 `app/data/ `、附件目录 `app/upload/`、插件目录 `app/plugins/` 需要定期备份。
-
-## AI插件开发指南
-
-推荐使用 AI 为本项目开发插件。插件开发规范、最小示例、资源、计划任务、数据库与 Hook 说明请阅读 [开发者文档](PLUGIN.md)。
-该文件是 bbs1org 唯一的插件开发规范，开发或修改插件前应完整阅读并遵守。
+SQLite数据目录 `app/data/` 和附件目录 `app/upload/` 需要定期备份。

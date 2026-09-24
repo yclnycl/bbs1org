@@ -18,14 +18,6 @@ final class Admin
         try { return (bool)opcache_reset(); } catch (\Throwable) { return false; }
     }
 
-    public static function opcache_refresh_route(): void
-    {
-        $lock_file = DATA_DIR . '/opcache-refresh.lock';
-        if (!is_file($lock_file) || !self::clear_opcache_cache()) { http_response_code(403); exit('failed'); }
-        @unlink($lock_file);
-        exit('ok');
-    }
-
     public static function save_settings(): void
     {
         $site_name = post('site_name', DB_STRING_MAX_LENGTH);
@@ -128,10 +120,6 @@ final class Admin
 
     public static function settings_html(): string
     {
-        $notice_state = Setup::update_state_data();
-        $pending_notice = is_array($notice_state['update_notice'] ?? null) ? $notice_state['update_notice'] : [];
-        $notice_sha = (string)($pending_notice['sha'] ?? ($notice_state['update_notice_sent_sha'] ?? ''));
-        Setup::deliver_update_notice();
         $settings = settings_cache();
         $fields = [
             'site_name' => ['label' => '网站名', 'required' => true],
@@ -154,14 +142,7 @@ final class Admin
         ];
         $tools = '<div class="settings-tool-card"><div><strong>清理OPcache</strong><span>刷新已编译脚本缓存，适合代码更新后手动触发。</span></div>' . post_action_form(admin_url(['tab' => 'settings']), '清理', ['clear_opcache' => '1'], 'settings-tool-action') . '</div>';
         if ((string)($settings['debug_mode'] ?? '0') === '1') $tools .= '<div class="settings-tool-card"><div><strong>Debug日志</strong><span>' . h(DEBUG_LOG_FILE) . '</span></div><div class="settings-tool-actions">' . post_action_form(admin_url(['tab' => 'settings']), '清空', ['debug_log_action' => 'clear'], 'settings-tool-action', '确定清空Debug日志？') . '<a class="settings-tool-action" href="' . h(admin_url(['tab' => 'settings', 'debug_log' => 'view'])) . '" target="_blank">查看</a></div></div>';
-        $update_state = is_file(UPDATE_STATE_FILE) ? json_decode((string)file_get_contents(UPDATE_STATE_FILE), true) : [];
-        $update_sha = is_array($update_state) ? (string)($update_state['sha'] ?? '') : '';
-        $update_time = is_array($update_state) ? (string)($update_state['updated_at'] ?? '') : '';
-        $update_meta = $update_sha !== '' ? '当前版本 ' . $update_sha . ($update_time !== '' ? ' / ' . $update_time : '') : '尚无在线升级记录';
-        $update_action = is_file(APP_DIR . '/optional/Setup.php') ? '<a class="settings-tool-action" href="' . h(route_url('update')) . '">升级</a>' : '<button class="settings-tool-action" type="button" disabled>升级</button>';
-        $update_dot = preg_match('/^[a-f0-9]{64}$/', $notice_sha) === 1 ? '<i class="settings-update-dot" title="发现新版本" aria-label="发现新版本"></i>' : '';
-        $tools .= '<div class="settings-tool-card"><div><strong class="settings-tool-title" data-update-tool-title>系统升级' . $update_dot . '</strong><span>' . h($update_meta) . '</span></div>' . $update_action . '</div>';
-        return '<span hidden data-settings-update-check-url="' . h(route_url('update', ['notice_check' => 1])) . '"></span><div class="form-panel settings-form"><form method="post">' . form_token() . render_form_fields($fields, $settings) . '<div class="row settings-actions"><button type="submit">保存</button></div></form><div class="settings-tool-grid">' . $tools . '</div></div>';
+        return '<div class="form-panel settings-form"><form method="post">' . form_token() . render_form_fields($fields, $settings) . '<div class="row settings-actions"><button type="submit">保存</button></div></form><div class="settings-tool-grid">' . $tools . '</div></div>';
     }
 
     public static function groups_html(): string
@@ -187,10 +168,8 @@ final class Admin
         need_admin();
         $tab = (string)($_GET['tab'] ?? 'settings');
         if ($tab === 'settings' && (string)($_GET['debug_log'] ?? '') === 'view') { header('Content-Type: text/plain; charset=utf-8'); echo is_file(DEBUG_LOG_FILE) ? (string)file_get_contents(DEBUG_LOG_FILE) : ''; exit; }
-        if ($tab === 'plugins' && is_post_request()) Plugin::admin_plugins_handle_post();
-        if ($tab === 'plugins' && (string)($_GET['plugin_action'] ?? '') === 'enable_uploaded') Plugin::plugin_enable_uploaded_page();
         if ($tab === 'settings' && is_post_request()) self::settings_handle_post();
-        $html = match ($tab) { 'settings' => self::settings_html(), 'groups' => self::groups_html(), 'forums' => self::forums_html(), 'plugins' => admin_plugins_html(), default => Plugin::admin_plugin_tab_html($tab) };
+        $html = match ($tab) { 'settings' => self::settings_html(), 'groups' => self::groups_html(), 'forums' => self::forums_html(), default => null };
         if ($html === null) err('你访问的页面不存在', 404);
         page('后台', self::layout($tab, $html));
     }

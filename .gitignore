@@ -12,3 +12,4 @@ app/*
 /scripts/
 .venv*
 .qoder
+docker/.env

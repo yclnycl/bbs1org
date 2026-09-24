@@ -652,7 +652,7 @@ function shell_html(string $main, string $sidebar, string $class = ''): string
 }
 function tab_bar_html(array $items, string $active, string $class = ''): string
 {
-    $html = '<div class="tab-bar' . ($class !== '' ? ' ' . $class : '') . '>';
+    $html = '<div class="tab-bar' . ($class !== '' ? ' ' . $class : '') . '">';
     foreach ($items as $key => $item) {
         $label = is_array($item) ? (string)($item['label'] ?? '') : (string)$item;
         $href = is_array($item) ? (string)($item['href'] ?? '#') : '#';

@@ -1,13 +1,14 @@
 # bbs1org
 
-一个极简 PHP 论坛。由一个仅100多KB大小的PHP文件构建。纯原生、无框架、无依赖，支持 SQLite、MySQL 和 PostgreSQL。适合社区站点、低成本部署和 AI 二次开发。
+一个极简 PHP 论坛。由一个仅100多KB大小的PHP文件构建。纯原生、无框架、无依赖，使用 SQLite 单文件数据库。适合社区站点、低成本部署和 AI 二次开发。
 
 ## 特点
 
 - 纯原生 PHP，单核心代码文件，无框架和 Composer 依赖，部署与维护简单
-- 支持 SQLite、MySQL 和 PostgreSQL，数据库结构和搜索能力保持跨引擎兼容
+- 使用 SQLite 单文件数据库，零外部依赖，备份即复制文件
 - 包含首页、版块、主题、回帖、收藏、个人主页和后台管理等完整论坛功能
 - 支持用户组、版块权限、站点设置、注册控制、发帖限制和附件管理
+- 无安装向导，首次访问按环境变量自动初始化，适配 Docker 一键部署
 - 站点设置、版块和用户组按需懒加载，数据库结构简单，负载能力强
 - 支持 AJAX 交互和响应式布局，兼顾 PC 与移动端使用体验
 
@@ -20,11 +21,9 @@
 | PHP | 8.1 及以上 | PHP 8.5 与当前 Docker 镜像一致 |
 | PDO | 随 PHP 安装 | 至少启用下方所选数据库对应的扩展 |
 | SQLite | SQLite 3 | 通过 `pdo_sqlite` 使用 |
-| MySQL | 8.0 及以上 | 通过 `pdo_mysql` 使用 |
-| PostgreSQL | 13 及以上 | 通过 `pdo_pgsql` 使用 |
 | Web 服务 | Nginx 或 Apache | Apache 需启用 PHP-FPM/模块及 URL 重写 |
 
-使用 Docker 部署还需要 Docker Engine 24 及以上、Docker Compose v2 和 `unzip`。Docker Compose 当前配置使用 PHP `8.5-fpm`、MySQL `8.4`、PostgreSQL `18` 和 Nginx Alpine 镜像；源码运行时仍以 PHP `8.1+` 为最低要求。
+使用 Docker 部署还需要 Docker Engine 24 及以上和 Docker Compose v2。Docker 镜像基于 PHP fpm-alpine 和 Nginx Alpine；源码运行时以 PHP `8.1+` 为最低要求。
 
 ## 演示
 
@@ -34,51 +33,39 @@ https://bbs1.org
 
 https://github.com/bbs1git/bbs1org
 
-## Docker 源码部署
+## Docker 部署（推荐）
 
-服务器需先安装 Docker Engine 24+、Docker Compose v2 和 `unzip`。Docker 可使用以下命令安装：
+服务器需先安装 Docker Engine 24+ 和 Docker Compose v2。Docker 可使用以下命令安装：
 
 ```bash
 curl -fsSL https://get.docker.com -o install-docker.sh
 sudo sh install-docker.sh
 ```
 
-从 [源码下载](https://bbs1.org/plugin_market_source) 获取程序包和 Docker 部署包，解压后的 `bbs1org`、`bbs1org_docker` 目录应放在同一目录下。
+在本仓库目录执行：
 
 ```bash
-curl -fL 'https://bbs1.org/plugin_market_source?path=bbs1org.zip&download=1' -o bbs1org.zip
-curl -fL 'https://bbs1.org/plugin_market_source?path=bbs1org_docker.zip&download=1' -o bbs1org_docker.zip
-
-unzip -q bbs1org.zip
-unzip -q bbs1org_docker.zip
-
-cd bbs1org_docker
+cd docker
 cp .env.example .env
-# 如需修改端口或数据库模式，请先编辑 .env
+# 按需编辑 .env：站点名、管理员账号、端口、数据库
 docker compose up -d
 ```
 
-容器启动后访问默认8080端口：
+容器启动后访问默认 8080 端口：
 
 ```text
 http://服务器地址:8080
 ```
 
-首次访问会进入网页安装程序，请在页面中设置站点、默认版块和管理员账号。
+无需安装向导：首次访问时程序会按环境变量自动完成初始化（建表、默认版块、管理员账号），数据保存在 `forum_data` 等数据卷中。管理员密码来自 `.env` 中的 `ADMIN_PASSWORD`；留空时自动生成随机密码，保存在数据卷 `app/data/admin-password.txt` 并打印到容器日志（`docker compose logs forum`）。
 
-默认使用 `SQLite`。如需修改 `8080` 端口，或者启用 `MySQL`、`PostgreSQL`，请在启动前修改 `.env`。数据库容器会按 `.env` 中的 `DB_NAME`、`DB_USER`、`DB_PASSWORD` 初始化；网页安装时填写同样的数据库名、用户名和密码。
+数据库固定使用 `SQLite`，数据文件保存在 `forum_data` 数据卷中。
 
-| 数据库 | `COMPOSE_PROFILES` | 数据库地址 | 端口 |
-| --- | --- | --- | --- |
-| SQLite | `sqlite` | 无需填写 | 无需填写 |
-| MySQL | `mysql` | `mysql` | `3306` |
-| PostgreSQL | `pgsql` | `postgres` | `5432` |
-
-常用操作（均在 `bbs1org_docker` 目录执行）：
+常用操作（均在 `docker` 目录执行）：
 
 ```bash
 docker compose ps                 # 查看状态
-docker compose logs -f            # 查看日志
+docker compose logs -f forum      # 查看日志
 docker compose restart            # 重启
 docker compose down               # 停止并保留数据卷
 ```
@@ -88,10 +75,19 @@ docker compose down               # 停止并保留数据卷
 环境要求：
 
 - PHP 8.1+
-- 启用 PDO；SQLite 需 `pdo_sqlite`，MySQL 需 `pdo_mysql`，PostgreSQL 需 `pdo_pgsql`
-- SQLite 3、MySQL 8.0+ 或 PostgreSQL 13+
+- 启用 PDO 的 `pdo_sqlite` 扩展（SQLite 3）
 - Web 服务运行用户对 `app/data/` 有写入权限；使用 SQLite 时数据库文件也保存在该目录
 - **必须禁止 Web 直接访问 `app/data/`**，该目录包含数据库、配置和运行缓存；部署完成后请确认访问 `https://你的域名/app/data/` 返回 `403` 或 `404`
+
+没有安装向导。程序在首次访问时按环境变量自动初始化；也可在 `app/data/db.php` 中手工写死数据库配置（存在时优先于环境变量）。可用的环境变量：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `SITE_NAME` | `FORUM` | 站点名（首次初始化生效） |
+| `FORUM_NAME` | `默认版块` | 默认版块名 |
+| `ADMIN_USERNAME` | `admin` | 管理员用户名 |
+| `ADMIN_EMAIL` | `admin@example.com` | 管理员邮箱 |
+| `ADMIN_PASSWORD` | 随机生成 | 留空时生成随机密码，保存到 `app/data/admin-password.txt` |
 
 Nginx 站点配置应包含：
 
@@ -125,17 +121,18 @@ RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.php [L,QSA]
 ```
 
-- 打开 [源码下载](https://bbs1.org/plugin_market_source)，下载 `bbs1org.zip`。
-- 解压 ZIP，将该目录内的全部文件上传到网站目录，确保 `index.php` 位于网站根目录。
-- 访问站点域名，根据指示进行安装即可。
+- 打开 [源码下载](https://bbs1.org/plugin_market_source)，下载 `bbs1org.zip`；或直接 `git clone` 本仓库。
+- 解压后将目录内全部文件上传到网站目录，确保 `index.php` 位于网站根目录。
+- 按上面的环境变量表设置 PHP 进程的环境变量（不设置则使用 SQLite 与默认管理员账号，随机密码见 `app/data/admin-password.txt`）。
+- 访问站点域名，首次访问自动完成初始化。
 
 ## 面板部署
 
-宝塔和 1Panel 可在面板终端执行“Docker 源码部署”中的下载、解压和启动命令。
+宝塔和 1Panel 可在面板终端执行“Docker 部署”中的克隆、配置和启动命令。
 
 ## 数据库转换和迁移
 
-先在新数据库完成安装并登录管理员账号，再访问 `index.php?a=migrate` 进入“数据迁入”。选择旧数据库类型并填写连接信息，程序会迁入旧库的全部普通数据表；当前库没有的表会自动复制字段、主键和索引后再导入数据，同名表则清空后替换，并保留原 ID。
+站点初始化后，管理员访问 `index.php?a=migrate` 进入“数据迁入”，填写旧 SQLite 数据库文件路径即可迁入；当前库没有的表会自动复制字段、主键和索引后再导入数据，同名表则清空后替换，并保留原 ID。
 
 附件、头像文件不在数据库中，需要另外复制 `app/upload/` 和 `app/avatars/`。迁移前请备份新旧数据库。
 

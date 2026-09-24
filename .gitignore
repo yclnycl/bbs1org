@@ -9,7 +9,6 @@ app/*
 .codebuddy
 .trae
 .workbuddy*
-/docker/
 /tmp/
 /scripts/
 .venv*

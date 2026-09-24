@@ -1,0 +1,6 @@
+.git
+.gitignore
+.dockerignore
+app/data
+app/upload
+app/avatars

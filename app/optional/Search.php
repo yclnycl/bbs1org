@@ -29,12 +29,8 @@ final class Search
         $field = topic_search_field($submitted ? (string)($_POST['field'] ?? 'title') : 'title');
         $page = $submitted ? min(max_pagination_pages(), max(1, (int)($_POST['p'] ?? 1))) : 1;
         if ($query !== '') require_search_min_chars($query);
-        $options = ['title' => '标题', 'body' => '内容', 'reply' => '回帖'];
-        $radios = '';
-        foreach ($options as $value => $label) $radios .= '<label class="search-page-radio"><input type="radio" name="field" value="' . $value . '"' . ($field === $value ? ' checked' : '') . '><span>' . $label . '</span></label>';
-        $form = '<form class="search-page-form" method="post" action="' . h(route_url('search')) . '" data-no-ajax="1">' . form_token() . '<div class="search-page-query"><input type="search" name="q" value="' . h($query) . '" placeholder="搜索关键词"' . length_attributes('q') . ' required autofocus><button type="submit">搜索</button></div><div class="search-page-types" role="radiogroup" aria-label="搜索范围">' . $radios . '</div></form>';
-        $main = '<div class="search-page-head"><h2>搜索</h2>' . $form . '</div>';
-        if ($submitted && $query === '') $main .= '<div class="empty-state">请输入搜索关键词</div>';
+        $rows = [];
+        $pagination = '';
         if ($query !== '') {
             if ($page === 1) {
                 $seconds = post_interval_seconds();
@@ -47,15 +43,21 @@ final class Search
             }
             $size = max(1, (int)setting('topics_per_page', '30'));
             $data = topic_index_data(0, null, 'topics', $query, $field, 'comment', $page, $size);
-            $main .= '<div class="search-page-summary">搜索“' . h($query) . '” · ' . $options[$field] . '</div><ul class="post-list search-page-results">';
-            if (!$data['rows']) $main .= '<li class="empty-state">没有找到匹配的' . ($field === 'reply' ? '回帖' : '主题') . '</li>';
-            else foreach ($data['rows'] as $row) {
+            foreach ($data['rows'] as $row) {
                 $row['time'] = (int)($row['list_time'] ?? $row['my_reply_at'] ?? ($row['last_reply_at'] ?: $row['created_at']));
                 $row['forum'] = forum_by_id((int)$row['forum_id']) ?: ['id' => 0, 'name' => ''];
-                $main .= topic_list_row($row, 'comment');
+                $rows[] = $row;
             }
-            $main .= '</ul>' . self::pagination($page > 1, (bool)$data['has_next_page'], $page, $query, $field);
+            $pagination = self::pagination($page > 1, (bool)$data['has_next_page'], $page, $query, $field);
         }
-        page('搜索', shell_html($main, '', 'search-page'));
+        render_page('search.html.twig', [
+            'submitted' => $submitted,
+            'query' => $query,
+            'field' => $field,
+            'field_options' => ['title' => '标题', 'body' => '内容', 'reply' => '回帖'],
+            'rows' => $rows,
+            'pagination' => $pagination,
+            'length_attributes' => length_attributes('q'),
+        ], '搜索');
     }
 }

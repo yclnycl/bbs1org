@@ -1,0 +1,12 @@
+{% extends 'layout.html.twig' %}
+{% block content %}
+    <div class="home-shell"><div class="forum-layout forum-layout-has-sidebar">
+        <div class="forum-main"><div class="main-panel" data-slot="mainpanel_extra">
+            <div class="form-panel form-error-panel">
+                <h2>{{ error_title }}</h2>
+                <p>{{ message != '' ? message : error_title }}</p>
+            </div>
+        </div></div>
+        {{ sidebar_stack_html([sidebar_user_card_html()]) }}
+    </div></div>
+{% endblock %}

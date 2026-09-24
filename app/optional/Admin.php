@@ -96,11 +96,6 @@ final class Admin
         return false;
     }
 
-    public static function layout(string $tab, string $body): string
-    {
-        return shell_html(admin_tabs($tab) . $body, sidebar_stack_html([sidebar_user_card_html()], ['is_admin' => true, 'admin_tab' => $tab]));
-    }
-
     public static function settings_handle_post(): never
     {
         if ((string)($_POST['debug_log_action'] ?? '') === 'clear') {
@@ -118,7 +113,7 @@ final class Admin
         go(admin_url(['tab' => 'settings']));
     }
 
-    public static function settings_html(): string
+    public static function settings_html(): array
     {
         $settings = settings_cache();
         $fields = [
@@ -142,25 +137,33 @@ final class Admin
         ];
         $tools = '<div class="settings-tool-card"><div><strong>清理OPcache</strong><span>刷新已编译脚本缓存，适合代码更新后手动触发。</span></div>' . post_action_form(admin_url(['tab' => 'settings']), '清理', ['clear_opcache' => '1'], 'settings-tool-action') . '</div>';
         if ((string)($settings['debug_mode'] ?? '0') === '1') $tools .= '<div class="settings-tool-card"><div><strong>Debug日志</strong><span>' . h(DEBUG_LOG_FILE) . '</span></div><div class="settings-tool-actions">' . post_action_form(admin_url(['tab' => 'settings']), '清空', ['debug_log_action' => 'clear'], 'settings-tool-action', '确定清空Debug日志？') . '<a class="settings-tool-action" href="' . h(admin_url(['tab' => 'settings', 'debug_log' => 'view'])) . '" target="_blank">查看</a></div></div>';
-        return '<div class="form-panel settings-form"><form method="post">' . form_token() . render_form_fields($fields, $settings) . '<div class="row settings-actions"><button type="submit">保存</button></div></form><div class="settings-tool-grid">' . $tools . '</div></div>';
+        return ['fields' => $fields, 'settings' => $settings, 'tools' => $tools];
     }
 
-    public static function groups_html(): string
+    public static function groups_view(): array
     {
-        $html = '<table class="list admin-bulk-list"><tr><th>名称</th><th>用户和内容管理</th><th>后台管理</th><th><a class="admin-head-add" href="' . h(admin_url(['do' => 'edit', 'type' => 'group', 'id' => 0])) . '">添加</a></th></tr>';
-        foreach (groups_cache() as $group) $html .= '<tr><td><strong class="admin-name">' . h($group['name']) . '</strong></td><td>' . self::flag((int)($group['allow_manage'] ?? 0)) . '</td><td>' . self::flag((int)($group['allow_admin'] ?? 0)) . '</td><td class="ops"><a href="' . h(admin_url(['do' => 'edit', 'type' => 'group', 'id' => (int)$group['id']])) . '">编辑</a>' . post_action_form(admin_url(['do' => 'delete']), '删除', ['type' => 'groups', 'id' => (int)$group['id'], 'tab' => 'groups'], 'danger', '确定删除？') . '</td></tr>';
-        return $html . '</table>';
+        $groups = [];
+        foreach (groups_cache() as $group) {
+            $group['flag_manage'] = self::flag((int)($group['allow_manage'] ?? 0));
+            $group['flag_admin'] = self::flag((int)($group['allow_admin'] ?? 0));
+            $groups[] = $group;
+        }
+        return ['groups' => $groups];
     }
 
-    public static function forums_html(): string
+    public static function forums_view(): array
     {
-        $html = '<table class="list admin-bulk-list"><tr><th>名称</th><th>排序</th><th>权限</th><th><a class="admin-head-add" href="' . h(admin_url(['do' => 'edit', 'type' => 'forum', 'id' => 0])) . '">添加</a></th></tr>';
+        $forums = [];
         foreach (forums_cache() as $forum) {
             $permissions = [];
-            foreach (['allow_view_groups' => '浏览', 'allow_post_groups' => '发帖', 'allow_reply_groups' => '回帖'] as $field => $label) { $count = count(forum_group_ids($forum, $field)); $permissions[] = $label . ':' . ($count ? $count . '组' : '不限'); }
-            $html .= '<tr><td><strong class="admin-name">' . h($forum['name']) . '</strong></td><td><span class="admin-group-pill">' . (int)$forum['sort'] . '</span></td><td>' . h(implode(' / ', $permissions)) . '</td><td class="ops"><a href="' . h(admin_url(['do' => 'edit', 'type' => 'forum', 'id' => (int)$forum['id']])) . '">编辑</a>' . post_action_form(admin_url(['do' => 'delete']), '删除', ['type' => 'forums', 'id' => (int)$forum['id'], 'tab' => 'forums'], 'danger', '确定删除？') . '</td></tr>';
+            foreach (['allow_view_groups' => '浏览', 'allow_post_groups' => '发帖', 'allow_reply_groups' => '回帖'] as $field => $label) {
+                $count = count(forum_group_ids($forum, $field));
+                $permissions[] = $label . ':' . ($count ? $count . '组' : '不限');
+            }
+            $forum['permissions'] = implode(' / ', $permissions);
+            $forums[] = $forum;
         }
-        return $html . '</table>';
+        return ['forums' => $forums];
     }
 
     public static function page(): void
@@ -169,9 +172,10 @@ final class Admin
         $tab = (string)($_GET['tab'] ?? 'settings');
         if ($tab === 'settings' && (string)($_GET['debug_log'] ?? '') === 'view') { header('Content-Type: text/plain; charset=utf-8'); echo is_file(DEBUG_LOG_FILE) ? (string)file_get_contents(DEBUG_LOG_FILE) : ''; exit; }
         if ($tab === 'settings' && is_post_request()) self::settings_handle_post();
-        $html = match ($tab) { 'settings' => self::settings_html(), 'groups' => self::groups_html(), 'forums' => self::forums_html(), default => null };
-        if ($html === null) err('你访问的页面不存在', 404);
-        page('后台', self::layout($tab, $html));
+        $template = match ($tab) { 'settings' => 'admin/settings.html.twig', 'groups' => 'admin/groups.html.twig', 'forums' => 'admin/forums.html.twig', default => '' };
+        if ($template === '') err('你访问的页面不存在', 404);
+        $view = match ($tab) { 'settings' => self::settings_html(), 'groups' => self::groups_view(), 'forums' => self::forums_view() };
+        render_page($template, $view + ['tab' => $tab], '后台');
     }
 
     public static function edit_page(): void
@@ -182,7 +186,7 @@ final class Admin
         if ($type === 'group') { $g = id() ? (group_by_id(id()) ?: err('用户组不存在')) : ['id' => 0, 'name' => '', 'allow_manage' => 0, 'allow_admin' => 0]; $tab = 'groups'; $body = input('名称', 'name', $g['name'], 'text', true) . checkbox('允许用户和内容管理', 'allow_manage', (bool)(int)($g['allow_manage'] ?? 0)) . checkbox('允许后台管理', 'allow_admin', (bool)(int)($g['allow_admin'] ?? 0)); }
         elseif ($type === 'forum') { $f = id() ? forum_by_id(id()) : ['id' => 0, 'name' => '', 'description' => '', 'sort' => 0, 'allow_view_groups' => '', 'allow_post_groups' => '', 'allow_reply_groups' => '']; if (!$f) err('版块不存在'); $tab = 'forums'; $body = input('名称', 'name', $f['name'], 'text', true) . number_input('排序', 'sort', $f['sort']) . textarea('描述', 'description', $f['description']) . self::forum_group_select_options($f, 'allow_view_groups', '允许浏览用户组') . self::forum_group_select_options($f, 'allow_post_groups', '允许发帖用户组') . self::forum_group_select_options($f, 'allow_reply_groups', '允许回帖用户组'); }
         else err('参数错误');
-        page('编辑', self::layout($tab, '<div class="form-panel"><h2>编辑</h2><form method="post">' . form_token() . '<input type="hidden" name="type" value="' . h($type) . '"><input type="hidden" name="id" value="' . id() . '">' . $body . '<button>保存</button></form></div>'));
+        render_page('admin/edit.html.twig', ['tab' => $tab, 'type' => $type, 'edit_id' => id(), 'body' => $body], '编辑');
     }
 
     public static function route(): void

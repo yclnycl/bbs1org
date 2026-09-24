@@ -1,0 +1,9 @@
+{% for section in sections %}
+    <section class="mobile-menu-section"><h3>{{ section.title }}</h3><nav class="mobile-menu-links">
+        {% for link in section.links %}
+            {% if link.url != '' and link.text|trim != '' %}
+                <a class="mobile-menu-link" href="{{ link.url }}">{{ link.text|trim }}</a>
+            {% endif %}
+        {% endfor %}
+    </nav></section>
+{% endfor %}

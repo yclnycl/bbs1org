@@ -1,0 +1,19 @@
+{% extends 'setup_layout.html.twig' %}
+{% block content %}
+    <div class="hero"><h1>迁入完成</h1><p>旧数据库数据已写入当前数据库。</p></div>
+    <div class="card">
+        <div class="hd"><h2>迁入结果</h2></div>
+        <div class="bd">
+            <div class="note ok">共迁入 {{ total }} 条数据。</div>
+            <div style="height:14px"></div>
+            <div class="kv">
+                <div>目标数据库</div><div class="mono">{{ target_label }}</div>
+                {% for table, count in counts %}
+                    <div>{{ table }}</div><div>{{ count }}</div>
+                {% endfor %}
+            </div>
+            <div style="height:14px"></div>
+            <div class="actions"><a class="btn" href="{{ route_url('home') }}">进入首页</a></div>
+        </div>
+    </div>
+{% endblock %}

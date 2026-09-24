@@ -1,0 +1,11 @@
+{% extends 'admin/layout.html.twig' %}
+{% block admin_body %}
+    <div class="form-panel settings-form">
+        <form method="post">
+            {{ form_token() }}
+            {{ render_form_fields(fields, settings) }}
+            <div class="row settings-actions"><button type="submit">保存</button></div>
+        </form>
+        <div class="settings-tool-grid">{{ tools|raw }}</div>
+    </div>
+{% endblock %}

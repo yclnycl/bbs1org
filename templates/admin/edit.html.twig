@@ -1,0 +1,13 @@
+{% extends 'admin/layout.html.twig' %}
+{% block admin_body %}
+    <div class="form-panel">
+        <h2>编辑</h2>
+        <form method="post">
+            {{ form_token() }}
+            <input type="hidden" name="type" value="{{ type }}">
+            <input type="hidden" name="id" value="{{ edit_id }}">
+            {{ body|raw }}
+            <button>保存</button>
+        </form>
+    </div>
+{% endblock %}

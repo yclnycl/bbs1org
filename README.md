@@ -1,10 +1,10 @@
 # bbs1org
 
-一个极简 PHP 论坛。由一个仅100多KB大小的PHP文件构建。纯原生、无框架、无依赖，使用 SQLite 单文件数据库。适合社区站点、低成本部署和 AI 二次开发。
+一个极简 PHP 论坛。核心逻辑集中在单个 PHP 文件中，页面渲染使用 Twig 模板（templates/ 目录），使用 SQLite 单文件数据库。适合社区站点、低成本部署和 AI 二次开发。
 
 ## 特点
 
-- 纯原生 PHP，单核心代码文件，无框架和 Composer 依赖，部署与维护简单
+- 页面渲染基于 Twig 3 模板（templates/ 目录，自动转义、模板缓存），路由函数只负责准备数据
 - 使用 SQLite 单文件数据库，零外部依赖，备份即复制文件
 - 包含首页、版块、主题、回帖、收藏、个人主页和后台管理等完整论坛功能
 - 支持用户组、版块权限、站点设置、注册控制、发帖限制和附件管理
@@ -18,8 +18,9 @@
 
 | 软件 | 版本要求 | 说明 |
 | --- | --- | --- |
-| PHP | 8.1 及以上 | PHP 8.5 与当前 Docker 镜像一致 |
-| PDO | 随 PHP 安装 | 至少启用下方所选数据库对应的扩展 |
+| PHP | 8.1 及以上 | PHP 8.2 与当前 Docker 镜像一致 |
+| Composer | 2.x | 安装 Twig 依赖：`composer install` |
+| PDO | 随 PHP 安装 | 启用 `pdo_sqlite` 扩展 |
 | SQLite | SQLite 3 | 通过 `pdo_sqlite` 使用 |
 | Web 服务 | Nginx 或 Apache | Apache 需启用 PHP-FPM/模块及 URL 重写 |
 
@@ -76,6 +77,7 @@ docker compose down               # 停止并保留数据卷
 
 - PHP 8.1+
 - 启用 PDO 的 `pdo_sqlite` 扩展（SQLite 3）
+- 项目根目录执行 `composer install` 生成 `vendor/`（Twig 模板引擎）
 - Web 服务运行用户对 `app/data/` 有写入权限；使用 SQLite 时数据库文件也保存在该目录
 - **必须禁止 Web 直接访问 `app/data/`**，该目录包含数据库、配置和运行缓存；部署完成后请确认访问 `https://你的域名/app/data/` 返回 `403` 或 `404`
 

@@ -1,0 +1,11 @@
+<div class="notify-pop" data-notify-username="{{ target.username }}">
+    <form class="notify-form" method="post" action="{{ route_url('notify', {id: target.id}) }}">
+        {{ form_token() }}
+        {% if quote != '' %}
+            <blockquote class="notify-quote-card"><p>{{ quote }}</p></blockquote>
+            <input type="hidden" name="quote" value="{{ quote }}">
+        {% endif %}
+        <textarea name="content" maxlength="{{ notify_max_length }}" placeholder="输入私信内容" required></textarea>
+        <div class="notify-actions"><span class="notify-status"></span><button type="submit">发送</button></div>
+    </form>
+</div>

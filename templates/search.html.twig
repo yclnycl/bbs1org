@@ -1,0 +1,38 @@
+{% extends 'layout.html.twig' %}
+{% block content %}
+    <div class="home-shell search-page"><div class="forum-layout">
+        <div class="forum-main"><div class="main-panel" data-slot="mainpanel_extra">
+            <div class="search-page-head">
+                <h2>搜索</h2>
+                <form class="search-page-form" method="post" action="{{ route_url('search') }}" data-no-ajax="1">
+                    {{ form_token() }}
+                    <div class="search-page-query">
+                        <input type="search" name="q" value="{{ query }}" placeholder="搜索关键词"{{ length_attributes|raw }} required autofocus>
+                        <button type="submit">搜索</button>
+                    </div>
+                    <div class="search-page-types" role="radiogroup" aria-label="搜索范围">
+                        {% for value, label in field_options %}
+                            <label class="search-page-radio"><input type="radio" name="field" value="{{ value }}"{{ field == value ? ' checked' : '' }}><span>{{ label }}</span></label>
+                        {% endfor %}
+                    </div>
+                </form>
+            </div>
+            {% if submitted and query == '' %}
+                <div class="empty-state">请输入搜索关键词</div>
+            {% endif %}
+            {% if query != '' %}
+                <div class="search-page-summary">搜索“{{ query }}” · {{ field_options[field] }}</div>
+                <ul class="post-list search-page-results">
+                    {% if not rows %}
+                        <li class="empty-state">没有找到匹配的{{ field == 'reply' ? '回帖' : '主题' }}</li>
+                    {% else %}
+                        {% for row in rows %}
+                            {{ topic_list_row(row, 'comment') }}
+                        {% endfor %}
+                    {% endif %}
+                </ul>
+                {{ pagination|raw }}
+            {% endif %}
+        </div></div>
+    </div></div>
+{% endblock %}

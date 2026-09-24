@@ -4,6 +4,7 @@ app/*
 !app/assets/index.svg
 !app/optional/
 !app/version.php
+/vendor/
 .DS_Store
 .vscode
 .codebuddy

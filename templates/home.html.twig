@@ -1,0 +1,44 @@
+{% extends 'layout.html.twig' %}
+{% block content %}
+    <div class="home-shell{{ shell_class ? ' ' ~ shell_class : '' }}"><div class="{{ sidebar != '' ? 'forum-layout forum-layout-has-sidebar' : 'forum-layout' }}">
+        <div class="forum-main"><div class="main-panel" data-slot="mainpanel_extra">
+            {% if profile_uid %}
+                <div class="profile-toolbar" data-slot="user.profile_tabs">{{ tab_bar_html(profile_tabs, profile_tab) }}</div>
+            {% else %}
+                {% if q == '' %}
+                    <div class="mobile-forum-strip">
+                        <a class="mobile-forum-link{{ fid ? '' : ' active' }}" href="{{ route_url('home') }}">全部</a>
+                        {% for f in mobile_forums %}
+                            <a class="mobile-forum-link{{ f.id == fid ? ' active' : '' }}" href="{{ route_url('forum', {id: f.id}) }}">{{ f.name }}</a>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+                <div class="topic-toolbar" data-slot="topic.index_tabs topic.toolbar_actions">
+                    {{ tab_bar_html(tab_items, sort) }}
+                    {% if can_speak() %}<a class="tab-post" href="{{ route_url('topic_edit', fid ? {fid: fid} : {}) }}">+ 发帖</a>{% endif %}
+                </div>
+            {% endif %}
+            <ul class="post-list">
+                {% if profile_uid and profile_tab_allowed and profile_tab == 'notifications' %}
+                    <div class="notification-box-tabs">{{ tab_bar_html(notification_tabs, notification_box, 'notify-tabs', 'user.notifications.tabs') }}</div>
+                    {% if not rows %}
+                        <li class="empty-state">暂无通知</li>
+                    {% else %}
+                        {% for n in notification_rows %}
+                            {% if n.divider %}<li class="notification-read-divider">下面的通知已读</li>{% endif %}
+                            {{ notification_row_html(n.row) }}
+                        {% endfor %}
+                    {% endif %}
+                {% elseif not rows %}
+                    <li class="empty-state">{{ empty_text }}</li>
+                {% else %}
+                    {% for t in list_rows %}
+                        {{ topic_list_row(t, sort) }}
+                    {% endfor %}
+                {% endif %}
+            </ul>
+            {% if pagination != '' %}<div class="pagination-bar">{{ pagination|raw }}</div>{% endif %}
+        </div></div>
+        {{ sidebar|raw }}
+    </div></div>
+{% endblock %}

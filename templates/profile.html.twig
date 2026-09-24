@@ -1,0 +1,44 @@
+{% extends 'layout.html.twig' %}
+{% block content %}
+    <div class="home-shell"><div class="forum-layout forum-layout-has-sidebar">
+        <div class="forum-main"><div class="main-panel" data-slot="mainpanel_extra">
+            <div class="profile-toolbar">{{ tab_bar_html(profile_tabs, profile_tab, '', 'profile.settings_tabs') }}</div>
+            {% if profile_tab == 'profile' %}
+                <div class="form-panel" data-slot="profile.after_form">
+                    <div class="profile-account-grid">
+                        <div class="profile-account-card"><span>用户名</span><strong>{{ u.username }}</strong></div>
+                        <div class="profile-account-card"><span>用户 UID</span><strong>{{ u.id }}</strong></div>
+                        <div class="profile-account-card"><span>邮箱</span><strong title="{{ u.email }}">{{ u.email }}</strong></div>
+                        <div class="profile-account-card"><span>注册时间</span><strong>{{ registered_at }}</strong></div>
+                        <div class="profile-account-card"><span>积分</span><strong>{{ u.points }}</strong></div>
+                        <div class="profile-account-card profile-account-logout">
+                            <form class="post-action-form" method="post" action="{{ route_url('logout') }}">
+                                {{ form_token() }}
+                                <button class="profile-exit-button" type="submit"><span>账号安全</span><strong>安全退出</strong></button>
+                            </form>
+                        </div>
+                    </div>
+                    <form method="post">
+                        {{ form_token() }}
+                        {{ avatar_picker_html(u) }}
+                        {{ textarea('简介', 'bio', u.bio) }}
+                        <div class="grid profile-disclosure" data-profile-disclosure>
+                            <div>
+                                <div class="profile-disclosure-summary">
+                                    <span class="profile-disclosure-heading"><span>密码</span><small>不修改密码</small></span>
+                                    <button class="profile-edit-action" type="button" data-profile-toggle aria-expanded="false">修改</button>
+                                </div>
+                                <div class="profile-disclosure-detail is-hidden" data-profile-edit>
+                                    {{ input('新密码', 'password', '', 'password') }}
+                                    {{ input('确认密码', 'password2', '', 'password') }}
+                                </div>
+                            </div>
+                        </div>
+                        <button>保存</button>
+                    </form>
+                </div>
+            {% endif %}
+        </div></div>
+        {{ sidebar_stack_html([sidebar_user_card_html(u, true)]) }}
+    </div></div>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends 'admin/layout.html.twig' %}
+{% block admin_body %}
+    <table class="list admin-bulk-list">
+        <tr><th>名称</th><th>排序</th><th>权限</th><th><a class="admin-head-add" href="{{ admin_url({do: 'edit', type: 'forum', id: 0}) }}">添加</a></th></tr>
+        {% for forum in forums %}
+            <tr>
+                <td><strong class="admin-name">{{ forum.name }}</strong></td>
+                <td><span class="admin-group-pill">{{ forum.sort }}</span></td>
+                <td>{{ forum.permissions }}</td>
+                <td class="ops">
+                    <a href="{{ admin_url({do: 'edit', type: 'forum', id: forum.id}) }}">编辑</a>
+                    {{ post_action_form(admin_url({do: 'delete'}), '删除', {type: 'forums', id: forum.id, tab: 'forums'}, 'danger', '确定删除？') }}
+                </td>
+            </tr>
+        {% endfor %}
+    </table>
+{% endblock %}

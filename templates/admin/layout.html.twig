@@ -1,0 +1,10 @@
+{% extends 'layout.html.twig' %}
+{% block content %}
+    <div class="home-shell"><div class="forum-layout forum-layout-has-sidebar">
+        <div class="forum-main"><div class="main-panel" data-slot="mainpanel_extra">
+            {{ admin_tabs(tab) }}
+            {% block admin_body %}{% endblock %}
+        </div></div>
+        {{ sidebar_stack_html([sidebar_user_card_html()], {is_admin: true, admin_tab: tab}) }}
+    </div></div>
+{% endblock %}

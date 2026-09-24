@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    {% if is_home and site_keywords != '' %}<meta name="keywords" content="{{ site_keywords }}">{% endif %}
+    {% if site_description != '' %}<meta name="description" content="{{ site_description }}">{% endif %}
+    {% if seo_canonical %}<link rel="canonical" href="{{ seo_canonical }}">{% endif %}
+    <title>{{ page_title }}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ asset_url('app/assets/index.svg') }}">
+    <link rel="stylesheet" href="{{ app_url('app/assets/index.css') }}?v={{ app_version }}">
+</head>
+<body>
+{% include 'nav.html.twig' with {nav: nav} only %}
+<main class="wrap" data-slot="page.before_render">
+    {% block content %}{% endblock %}
+</main>
+<footer class="footer" data-slot="page.footer"></footer>
+<div class="modal-backdrop" id="notify-modal" hidden>
+    <div class="modal-panel">
+        <div class="modal-head"><strong id="notify-modal-title">提示</strong><button type="button" class="modal-close" data-modal-close aria-label="关闭">×</button></div>
+        <div class="modal-body" id="notify-modal-body"></div>
+    </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+<script>window.__pageFlash={{ flash_json(flash) }};</script>
+<script src="{{ app_url('app/assets/index.js') }}?v={{ app_version }}" defer></script>
+</body>
+</html>

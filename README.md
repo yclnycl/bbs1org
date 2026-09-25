@@ -183,6 +183,40 @@ TURNSTILE_HOSTNAMES=localhost,127.0.0.1     # 线上填 cncttc.com,www.cncttc.co
 - 白名单只写本站自己的域名。线上那份**不能**包含 `localhost` / `127.0.0.1`，否则别的机器可以拿本地的 token 来通过校验
 - 想本地联调就用同一对 site key / secret：把 `localhost`、`127.0.0.1` 加进 Cloudflare 上该组件的域名列表即可。Cloudflare 的测试 site key（`1x00000000000000000000AA` 等）产生的固定 token 不带 `action`，过不了 `action` 校验，只适合验证组件渲染
 
+## MCP 接入（AI 客户端）
+
+`/mcp` 提供一套带鉴权与审计的 MCP（Model Context Protocol）服务，传输为 Streamable HTTP 的无会话实现（单端点 JSON-RPC，不需要 SSE）。**登录与鉴权分离**：网页登录仍是 Cookie 会话；MCP 只认 `Authorization: Bearer` 令牌，而令牌必须先在网页端登录后才能创建。
+
+### 获取令牌
+
+1. 正常登录论坛，进入 **个人设置 → API 令牌（MCP）**
+2. 填一个便于识别的名称（会出现在审计日志里），点「创建令牌」
+3. 明文令牌（`bbs1_` 开头）**只在创建时显示一次**，请立即保存；库里只存 SHA-256 摘要，丢失只能吊销重建
+4. 不用时在列表里点「吊销」，立即失效
+
+### 客户端配置
+
+```json
+{
+  "mcpServers": {
+    "forum": {
+      "url": "https://<你的域名>/mcp",
+      "headers": { "Authorization": "Bearer bbs1_xxxxxxxx..." }
+    }
+  }
+}
+```
+
+内置工具：`site_info`（站点与版块权限概况）、`list_topics`（主题列表，支持版块/用户/标题关键词筛选与分页）、`get_topic`（正文 + 分页回帖，不累计浏览量）、`create_topic` / `create_reply`（发主题/回帖）、`my_info`（当前账号与令牌信息）。
+
+### 权限与安全
+
+- 令牌的权限与所属账号**完全一致**：禁言、版块用户组限制（浏览/发帖/回帖）、发帖间隔、站点关闭状态全部照常生效
+- 令牌只存摘要，服务端不落明文；`last_used_at` 按分钟节流记录，可在个人设置里看到是否被盗用
+- **每次调用（含鉴权失败与被拒绝）都写入 `app_api_logs` 审计表**：用户、令牌、工具、参数与结果摘要（截断保存）、来源 IP、耗时、状态（成功/被拒绝/未授权/错误）。后台「MCP日志」标签页可按状态/工具/用户筛选查看，管理员可一键清空
+- 令牌创建与吊销本身也记入审计日志
+- MCP 端点不受 CSRF 双提交约束（不依赖 Cookie 鉴权），但同样不豁免任何业务权限检查
+
 ## 数据层
 
 数据访问统一通过 Eloquent 完成，业务代码里不再有手写 SQL：

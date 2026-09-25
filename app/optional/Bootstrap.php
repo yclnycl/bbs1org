@@ -107,6 +107,10 @@ final class Bootstrap
             'app_replies' => "CREATE TABLE app_replies(id $id,topic_id $uint NOT NULL,user_id $uint NOT NULL,body $long NOT NULL,created_at $uint NOT NULL,updated_at $uint NOT NULL)",
             'app_settings' => "CREATE TABLE app_settings(name $key PRIMARY KEY,value $long NOT NULL)",
             'app_view_stats' => "CREATE TABLE app_view_stats(view_date $key PRIMARY KEY,views $uint NOT NULL DEFAULT 0)",
+            // MCP 接入令牌：库里只存 SHA-256 摘要，明文只在创建响应里出现一次
+            'app_api_tokens' => "CREATE TABLE app_api_tokens(id $id,user_id $uint NOT NULL,name $short NOT NULL DEFAULT '',token_hash $key NOT NULL UNIQUE,created_at $uint NOT NULL,last_used_at $uint NOT NULL DEFAULT 0,revoked_at $uint NOT NULL DEFAULT 0)",
+            // MCP 审计日志：每一次调用（含鉴权失败）都落一条，供后台「MCP日志」查阅
+            'app_api_logs' => "CREATE TABLE app_api_logs(id $id,user_id $uint DEFAULT NULL,token_id $uint DEFAULT NULL,tool $short NOT NULL DEFAULT '',status $short NOT NULL DEFAULT '',args_json $long NOT NULL,result_json $long NOT NULL,message $short NOT NULL DEFAULT '',ip $short NOT NULL DEFAULT '',duration_ms $uint NOT NULL DEFAULT 0,created_at $uint NOT NULL)",
         ];
         $indexes = [
             'idx_users_group' => 'app_users(group_id)', 'idx_users_email' => 'app_users(email)', 'idx_forums_sort' => 'app_forums(sort,id)',
@@ -120,6 +124,9 @@ final class Bootstrap
             'idx_topics_created' => 'app_topics(created_at DESC,id DESC)', 'idx_topics_last_reply' => 'app_topics(last_reply_at DESC,id DESC)',
             'idx_topics_user_created' => 'app_topics(user_id,created_at DESC,id DESC)', 'idx_topics_forum_created' => 'app_topics(forum_id,created_at DESC,id DESC)',
             'idx_topics_forum_last_reply' => 'app_topics(forum_id,last_reply_at DESC,id DESC)',
+            'idx_api_tokens_user' => 'app_api_tokens(user_id)',
+            'idx_api_logs_time' => 'app_api_logs(created_at DESC,id DESC)',
+            'idx_api_logs_user' => 'app_api_logs(user_id,created_at DESC)',
         ];
         foreach ($indexes as $name => &$target) $target = 'CREATE INDEX ' . $name . ' ON ' . $target;
         unset($target);

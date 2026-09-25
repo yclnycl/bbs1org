@@ -3921,7 +3921,8 @@ table.list{
 
 .admin-filter input[type="search"],
 .admin-filter select,
-.admin-filter input[type="date"]{
+.admin-filter input[type="date"],
+.admin-filter input[type="number"]{
     width: auto;
     min-height: 34px;
     min-width: 170px;
@@ -4054,3 +4055,91 @@ table.list{
 .report-bar-views{background: var(--info-soft)}
 
 .report-total-row td{font-weight: 700}
+
+/* ==========================================================================
+   15. 后台 MCP 日志 + 个人设置 API 令牌
+   ========================================================================== */
+
+.admin-mcp-toolbar{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    flex-wrap: wrap
+}
+
+.admin-mcp-toolbar .admin-filter{margin-bottom: 0}
+
+.admin-mcp-total{display: block; margin-bottom: var(--sp-3)}
+
+.admin-mcp-detail-cell details{min-width: 0}
+
+.admin-mcp-detail-row td:last-child{padding-top: 0; border-top: none; text-align: left}
+
+.admin-mcp-detail-row summary{
+    cursor: pointer;
+    color: var(--ink-3);
+    font-size: var(--fs-sm)
+}
+
+.admin-mcp-detail-row summary:hover{color: var(--brand-strong)}
+
+.admin-mcp-detail p{margin: 0 0 var(--sp-2); color: var(--ink-2); font-size: var(--fs-sm)}
+
+.admin-mcp-detail pre{
+    margin: 0 0 var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    max-height: 260px;
+    overflow: auto;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    color: var(--ink-2);
+    font-size: var(--fs-xs);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-all
+}
+
+.admin-flag-ok{border-color: var(--success-line); background: var(--success-soft); color: var(--success)}
+
+.admin-flag-denied{border-color: var(--warning-line); background: var(--warning-soft); color: var(--warning)}
+
+.admin-flag-unauthorized,.admin-flag-error{border-color: var(--danger-line); background: var(--danger-soft); color: var(--danger)}
+
+.profile-api-panel h2{margin-bottom: var(--sp-2)}
+
+.profile-api-hint{margin: 0 0 var(--sp-3); color: var(--ink-3); font-size: var(--fs-sm); line-height: 1.7}
+
+.profile-api-hint code{
+    padding: 0 var(--sp-1);
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    color: var(--ink-2);
+    font-size: var(--fs-xs)
+}
+
+.mcp-token-box{
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    margin-bottom: var(--sp-3);
+    padding: var(--sp-3);
+    border: 1px solid var(--warning-line);
+    border-radius: var(--r-md);
+    background: var(--warning-soft)
+}
+
+.mcp-token-label{color: var(--warning); font-size: var(--fs-sm); font-weight: 600}
+
+.mcp-token-value{
+    word-break: break-all;
+    color: var(--ink);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    user-select: all
+}
+
+.profile-api-create{margin-bottom: var(--sp-2)}
+
+.profile-api-list{margin-top: var(--sp-2)}

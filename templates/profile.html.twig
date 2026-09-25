@@ -37,6 +37,34 @@
                         <button>保存</button>
                     </form>
                 </div>
+                <div class="form-panel profile-api-panel">
+                    <h2>API 令牌（MCP）</h2>
+                    <p class="profile-api-hint">用于 MCP 客户端接入论坛（如 AI 编程助手）。先在网页端登录，再创建令牌；调用时以 <code>Authorization: Bearer &lt;令牌&gt;</code> 访问 <code>{{ mcp_endpoint }}</code>。令牌的权限与你的账号完全一致（禁言、版块限制照常生效），所有调用都会记录审计日志（后台「MCP日志」）。</p>
+                    {% if new_token|default('') != '' %}
+                        <div class="mcp-token-box"><span class="mcp-token-label">新令牌已创建，仅显示这一次，请立即复制保存</span><code class="mcp-token-value">{{ new_token }}</code></div>
+                    {% endif %}
+                    {# 创建令牌要整页渲染才能一次性展示明文，必须走原生提交，不走全站 AJAX 表单拦截 #}
+                    <form class="profile-api-create" method="post" data-no-ajax="1">
+                        {{ f.token() }}
+                        <input type="hidden" name="do" value="mcp_token_create">
+                        {{ f.input('令牌名称', 'name', '', 'text', false, '例如：我的 AI 助手，便于在审计日志里识别') }}
+                        <button type="submit">创建令牌</button>
+                    </form>
+                    {% if api_tokens %}
+                        <table class="list profile-api-list">
+                            <tr><th>名称</th><th>创建时间</th><th>最后使用</th><th>状态</th><th>操作</th></tr>
+                            {% for t in api_tokens %}
+                                <tr>
+                                    <td>{{ t.name }}</td>
+                                    <td>{{ t.created_time }}</td>
+                                    <td>{{ t.last_used_time }}</td>
+                                    <td><span class="admin-flag{{ t.is_active ? '' : ' danger' }}">{{ t.is_active ? '有效' : '已吊销' }}</span></td>
+                                    <td class="ops">{% if t.is_active %}{{ f.action_form(route_url('profile'), '吊销', {do: 'mcp_token_revoke', id: t.id}, 'danger', '确定吊销该令牌？使用它的客户端会立即失效。') }}{% endif %}</td>
+                                </tr>
+                            {% endfor %}
+                        </table>
+                    {% endif %}
+                </div>
             {% endif %}
         </div></div>
         {# 本页没有 #reply 锚点，回帖按钮会失效；改为指向发帖 #}

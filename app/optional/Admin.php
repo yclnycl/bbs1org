@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace app\optional;
 
+use app\optional\Model\ApiLog;
 use app\optional\Model\Forum;
 use app\optional\Model\Group;
 use app\optional\Model\Reply;
@@ -162,15 +163,18 @@ final class Admin
         if ($tab === 'settings' && is_post_request()) self::settings_handle_post();
         if ($tab === 'topics' && is_post_request()) self::topics_handle_post();
         if ($tab === 'users' && is_post_request()) self::users_handle_post();
+        if ($tab === 'mcp' && is_post_request()) self::mcp_handle_post();
         $template = match ($tab) {
             'settings' => 'admin/settings.html.twig', 'groups' => 'admin/groups.html.twig', 'forums' => 'admin/forums.html.twig',
             'topics' => 'admin/topics.html.twig', 'users' => 'admin/users.html.twig', 'report' => 'admin/report.html.twig',
+            'mcp' => 'admin/mcp.html.twig',
             default => '',
         };
         if ($template === '') err('你访问的页面不存在', 404);
         $view = match ($tab) {
             'settings' => self::settings_html(), 'groups' => self::groups_view(), 'forums' => self::forums_view(),
             'topics' => self::topics_view(), 'users' => self::users_view(), 'report' => self::report_view(),
+            'mcp' => self::mcp_view(),
             default => [],
         };
         render_page($template, $view + ['tab' => $tab], '后台');
@@ -405,6 +409,64 @@ final class Admin
             'users_total' => User::count(),
             'quick' => $quick,
         ];
+    }
+
+    /** MCP 审计日志：状态/工具/用户筛选 + 分页，行内展开调用参数与结果 */
+    public static function mcp_view(): array
+    {
+        $status = (string)($_GET['status'] ?? '');
+        $tool = trim((string)($_GET['tool'] ?? ''));
+        $filter_uid = max(0, (int)($_GET['user_id'] ?? 0));
+        $p = max(1, (int)($_GET['p'] ?? 1));
+        $size = 30;
+        $base = static function () use ($status, $tool, $filter_uid) {
+            $builder = ApiLog::query();
+            if (in_array($status, ['ok', 'denied', 'unauthorized', 'error'], true)) $builder->where('status', $status);
+            if ($tool !== '') $builder->where('tool', 'like', search_like_pattern($tool));
+            if ($filter_uid > 0) $builder->where('user_id', $filter_uid);
+            return $builder;
+        };
+        $total = $base()->count();
+        $rows = $base()->orderByDesc('created_at')->orderByDesc('id')
+            ->limit($size)->offset(($p - 1) * $size)->get()->map->toArray()->all();
+        $users = user_summaries(array_column($rows, 'user_id'));
+        $labels = ['ok' => '成功', 'denied' => '被拒绝', 'unauthorized' => '未授权', 'error' => '错误'];
+        foreach ($rows as &$row) {
+            $row['username'] = (string)(($users[(int)($row['user_id'] ?? 0)] ?? null)?->username ?? '—');
+            $row['time'] = date('Y-m-d H:i:s', (int)$row['created_at']);
+            $row['status_label'] = $labels[$row['status']] ?? (string)$row['status'];
+            $row['args_pretty'] = self::pretty_json((string)$row['args_json']);
+            $row['result_pretty'] = self::pretty_json((string)$row['result_json']);
+        }
+        unset($row);
+        return [
+            'rows' => $rows,
+            'total' => $total,
+            'status' => $status,
+            'tool' => $tool,
+            'user_id' => $filter_uid,
+            'statuses' => ['' => '全部状态'] + $labels,
+            'page' => $p,
+            'pagination' => pagination_data(false, $total, $p, $size, admin_url(['tab' => 'mcp', 'status' => $status !== '' ? $status : null, 'tool' => $tool !== '' ? $tool : null, 'user_id' => $filter_uid > 0 ? $filter_uid : null])),
+        ];
+    }
+
+    public static function mcp_handle_post(): void
+    {
+        require_post();
+        if (!can_manage()) err('无权限');
+        if ((string)($_POST['do'] ?? '') !== 'clear_logs') err('参数错误');
+        ApiLog::query()->delete();
+        set_flash('MCP 日志已清空');
+        go(admin_url(['tab' => 'mcp']));
+    }
+
+    /** 日志里的 JSON 原样美化展示；截断导致的不完整 JSON 退回原文 */
+    private static function pretty_json(string $raw): string
+    {
+        if ($raw === '') return '';
+        $data = json_decode($raw, true);
+        return is_array($data) ? (string)json_encode($data, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PRETTY_PRINT) : $raw;
     }
 
     /** 校验 Y-m-d 日期参数，非法返回空串 */

@@ -6,6 +6,7 @@ use app\optional\Db\Database;
 use app\optional\Db\SqlitePdo;
 use app\optional\DebugLog;
 use app\optional\Markdown;
+use app\optional\Mcp;
 use app\optional\Model\Forum;
 use app\optional\Model\Group;
 use app\optional\Model\Notification;
@@ -646,6 +647,8 @@ function need_site_access(): void
 {
     $a = $_GET['a'] ?? 'home';
     limit_pagination_request_pages();
+    // 站点关闭时 MCP 由 Mcp::route() 按令牌身份自行判定，返回 JSON-RPC 错误而不是 HTML 消息页
+    if ($a === 'mcp') return;
     if (setting('site_closed') === '1' && !can_access_admin()) {
         if (!in_array($a, ['login', 'logout', 'form_error'], true)) err('网站已关闭');
     }
@@ -655,7 +658,8 @@ function check(): void
     if (uid()) me();
     $is_post = is_post_request();
     $action = (string)($_GET['a'] ?? '');
-    if ($is_post && !hash_equals(csrf_token(), (string)($_POST['_csrf'] ?? ''))) {
+    // MCP 走 Bearer 令牌鉴权，不依赖 Cookie 会话，没有 CSRF 面；双提交校验只服务网页表单
+    if ($is_post && $action !== 'mcp' && !hash_equals(csrf_token(), (string)($_POST['_csrf'] ?? ''))) {
         err('请求已过期');
     }
 }
@@ -1568,17 +1572,34 @@ function profile_page(): void
     $profile_tabs = $default_profile_tabs;
     if (!array_key_exists($profile_tab, $profile_tabs)) $profile_tab = 'profile';
 
-    if ($profile_tab === 'profile' && is_post_request()) {
-        save_user(uid());
-        set_flash('个人资料已保存');
-        go(route_url('profile'));
-    }
-    render_page('profile.html.twig', [
+    $view = [
         'u' => $u,
         'profile_tabs' => $profile_tabs,
         'profile_tab' => $profile_tab,
         'registered_at' => date('Y-m-d H:i', (int)$u['created_at']),
-    ], '个人设置');
+        'api_tokens' => Mcp::tokens_for_user((int)$u['id']),
+        'mcp_endpoint' => absolute_url(route_url('mcp')),
+    ];
+
+    if ($profile_tab === 'profile' && is_post_request()) {
+        $do = (string)($_POST['do'] ?? '');
+        if ($do === 'mcp_token_create') {
+            $view['api_tokens'] = Mcp::tokens_for_user((int)$u['id']);
+            // 令牌明文只在这次响应里展示一次，不落库也不通过重定向/Flash 传递
+            $view['new_token'] = Mcp::create_token((int)$u['id'], post('name', 50));
+            render_page('profile.html.twig', $view, '个人设置');
+            return;
+        }
+        if ($do === 'mcp_token_revoke') {
+            Mcp::revoke_token((int)$u['id'], id());
+            set_flash('API 令牌已吊销');
+            go(route_url('profile'));
+        }
+        save_user(uid());
+        set_flash('个人资料已保存');
+        go(route_url('profile'));
+    }
+    render_page('profile.html.twig', $view, '个人设置');
 }
 function user_page(): void
 {
@@ -1938,7 +1959,7 @@ function reply_edit_page(): void
 function admin_tabs(): array
 {
     $items = [];
-    foreach (['settings' => '设置', 'forums' => '版块', 'groups' => '用户组', 'topics' => '帖子管理', 'users' => '用户管理', 'report' => '数据报表'] as $key => $label) {
+    foreach (['settings' => '设置', 'forums' => '版块', 'groups' => '用户组', 'topics' => '帖子管理', 'users' => '用户管理', 'report' => '数据报表', 'mcp' => 'MCP日志'] as $key => $label) {
         $items[$key] = ['label' => $label, 'href' => admin_url(['tab' => $key])];
     }
     return $items;
@@ -2005,6 +2026,7 @@ function core_routes(): array
         'topic_edit' => 'topic_edit_page',
         'reply_edit' => 'reply_edit_page',
         'delete' => 'delete_route',
+        'mcp' => [Mcp::class, 'route'],
         'admin' => [Admin::class, 'route'],
     ];
 }

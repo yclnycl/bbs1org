@@ -1,0 +1,47 @@
+{% extends 'admin/layout.html.twig' %}
+{% import 'macros/ui.html.twig' as ui %}
+{% import 'macros/form.html.twig' as f %}
+{% block admin_body %}
+    <div class="admin-mcp-toolbar">
+        <form class="admin-filter" method="get" action="{{ admin_url() }}">
+            <input type="hidden" name="tab" value="mcp">
+            <select name="status">{% for value, label in statuses %}<option value="{{ value }}"{{ status == value ? ' selected' : '' }}>{{ label }}</option>{% endfor %}</select>
+            <input type="search" name="tool" value="{{ tool }}" placeholder="按工具名筛选">
+            <input type="number" name="user_id" value="{{ user_id > 0 ? user_id : '' }}" placeholder="用户 ID" min="1">
+            <button type="submit">查询</button>
+            {% if status != '' or tool != '' or user_id > 0 %}<a href="{{ admin_url({tab: 'mcp'}) }}">清空条件</a>{% endif %}
+        </form>
+        {{ f.action_form(admin_url({tab: 'mcp'}), '清空日志', {do: 'clear_logs'}, 'danger', '确定清空全部 MCP 调用日志？该操作不可恢复。') }}
+    </div>
+    <span class="admin-filter-total admin-mcp-total">共 {{ total }} 条调用记录</span>
+    <table class="list admin-bulk-list admin-mcp-list">
+        <tr><th>时间</th><th>用户</th><th>工具</th><th>状态</th><th>IP</th><th>耗时</th><th>详情</th></tr>
+        {% for row in rows %}
+            <tr>
+                <td>{{ row.time }}</td>
+                <td>{{ row.username }}</td>
+                <td>{{ row.tool }}</td>
+                <td><span class="admin-flag admin-flag-{{ row.status }}">{{ row.status_label }}</span></td>
+                <td>{{ row.ip }}</td>
+                <td>{{ row.duration_ms }} ms</td>
+                <td></td>
+            </tr>
+            {# 详情独占一行跨全列，避免把时间/工具等列挤压变形 #}
+            <tr class="admin-mcp-detail-row">
+                <td colspan="7">
+                    <details>
+                        <summary>参数 / 结果</summary>
+                        <div class="admin-mcp-detail">
+                            {% if row.message != '' %}<p><strong>消息：</strong>{{ row.message }}</p>{% endif %}
+                            {% if row.args_pretty != '' %}<pre>{{ row.args_pretty }}</pre>{% endif %}
+                            {% if row.result_pretty != '' %}<pre>{{ row.result_pretty }}</pre>{% endif %}
+                        </div>
+                    </details>
+                </td>
+            </tr>
+        {% else %}
+            <tr><td colspan="7">暂无调用记录</td></tr>
+        {% endfor %}
+    </table>
+    {% if pagination %}<div class="pagination-bar">{{ ui.pagination(pagination.total, pagination.page, pagination.size, pagination.url, pagination.limited) }}</div>{% endif %}
+{% endblock %}

@@ -7,6 +7,8 @@ use app\optional\Model\Forum;
 use app\optional\Model\Group;
 use app\optional\Model\Reply;
 use app\optional\Model\Topic;
+use app\optional\Model\User;
+use app\optional\Model\ViewStat;
 
 if (!defined('APP_ROOT')) exit;
 
@@ -158,9 +160,19 @@ final class Admin
         $tab = (string)($_GET['tab'] ?? 'settings');
         if ($tab === 'settings' && (string)($_GET['debug_log'] ?? '') === 'view') { header('Content-Type: text/plain; charset=utf-8'); echo is_file(DEBUG_LOG_FILE) ? (string)file_get_contents(DEBUG_LOG_FILE) : ''; exit; }
         if ($tab === 'settings' && is_post_request()) self::settings_handle_post();
-        $template = match ($tab) { 'settings' => 'admin/settings.html.twig', 'groups' => 'admin/groups.html.twig', 'forums' => 'admin/forums.html.twig', default => '' };
+        if ($tab === 'topics' && is_post_request()) self::topics_handle_post();
+        if ($tab === 'users' && is_post_request()) self::users_handle_post();
+        $template = match ($tab) {
+            'settings' => 'admin/settings.html.twig', 'groups' => 'admin/groups.html.twig', 'forums' => 'admin/forums.html.twig',
+            'topics' => 'admin/topics.html.twig', 'users' => 'admin/users.html.twig', 'report' => 'admin/report.html.twig',
+            default => '',
+        };
         if ($template === '') err('你访问的页面不存在', 404);
-        $view = match ($tab) { 'settings' => self::settings_html(), 'groups' => self::groups_view(), 'forums' => self::forums_view() };
+        $view = match ($tab) {
+            'settings' => self::settings_html(), 'groups' => self::groups_view(), 'forums' => self::forums_view(),
+            'topics' => self::topics_view(), 'users' => self::users_view(), 'report' => self::report_view(),
+            default => [],
+        };
         render_page($template, $view + ['tab' => $tab], '后台');
     }
 
@@ -168,7 +180,13 @@ final class Admin
     {
         need_admin();
         $type = $_GET['type'] ?? $_POST['type'] ?? '';
-        if (is_post_request()) { if ($type === 'group') self::save_group(); elseif ($type === 'forum') self::save_forum(); else err('参数错误'); go(admin_url(['tab' => $type . 's'])); }
+        if (is_post_request()) {
+            if ($type === 'group') self::save_group();
+            elseif ($type === 'forum') self::save_forum();
+            elseif ($type === 'user') self::save_user_admin();
+            else err('参数错误');
+            go(admin_url(['tab' => $type . 's']));
+        }
         $view = ['type' => $type, 'edit_id' => id()];
         if ($type === 'group') {
             $view += ['tab' => 'groups', 'group' => id() ? (group_by_id(id()) ?: err('用户组不存在')) : ['id' => 0, 'name' => '', 'allow_manage' => 0, 'allow_admin' => 0]];
@@ -178,10 +196,13 @@ final class Admin
             $selected = [];
             foreach (['allow_view_groups', 'allow_post_groups', 'allow_reply_groups'] as $field) $selected[$field] = forum_group_ids($f, $field);
             $view += ['tab' => 'forums', 'forum' => $f, 'groups' => groups_cache(), 'forum_selected' => $selected];
+        } elseif ($type === 'user') {
+            $u = User::find(id()) ?: err('用户不存在');
+            $view += ['tab' => 'users', 'user' => $u->toArray() + ['topics_count' => $u->topics()->count(), 'replies_count' => $u->replies()->count()], 'group_options' => array_column(groups_cache(), 'name', 'id'), 'registered_at' => date('Y-m-d H:i', (int)$u->created_at)];
         } else {
             err('参数错误');
         }
-        render_page('admin/edit.html.twig', $view, '编辑');
+        render_page($type === 'user' ? 'admin/user_edit.html.twig' : 'admin/edit.html.twig', $view, '编辑');
     }
 
     public static function route(): void
@@ -191,10 +212,223 @@ final class Admin
         if ($do === '') { self::page(); return; }
         if ($do !== 'delete') err('你访问的页面不存在', 404);
         require_post(); need_admin();
-        $type = ['group' => 'groups', 'groups' => 'groups', 'forum' => 'forums', 'forums' => 'forums'][$_POST['type'] ?? ''] ?? '';
-        if (!in_array($type, ['groups', 'forums'], true)) err('参数错误');
+        $type = ['group' => 'groups', 'groups' => 'groups', 'forum' => 'forums', 'forums' => 'forums', 'user' => 'users', 'users' => 'users', 'topic' => 'topics', 'topics' => 'topics'][$_POST['type'] ?? ''] ?? '';
+        if (!in_array($type, ['groups', 'forums', 'users', 'topics'], true)) err('参数错误');
         if (!self::can_delete($type, id())) err('无权限');
-        del($type, id());
-        go(admin_url(['tab' => $type]));
+        if ($type === 'topics') del('topics', id(), true);
+        else del($type, id());
+        go(admin_url(['tab' => $type, 'q' => trim((string)($_POST['q'] ?? '')) ?: null, 'p' => max(1, (int)($_POST['p'] ?? 1))]));
+    }
+
+    /** 后台帖子管理列表：标题搜索 + 版块筛选 + 分页，带浏览量/回复数与高亮样式 */
+    public static function topics_view(): array
+    {
+        $q = trim((string)($_GET['q'] ?? ''));
+        $fid = max(0, (int)($_GET['fid'] ?? 0));
+        $p = max(1, (int)($_GET['p'] ?? 1));
+        $size = max(1, (int)setting('topics_per_page', '30'));
+        $base = static function () use ($q, $fid) {
+            $builder = Topic::query();
+            if ($fid > 0) $builder->where('forum_id', $fid);
+            if ($q !== '') {
+                [$condition, $params] = content_search_condition($q, 'title');
+                $builder->whereRaw('(' . $condition . ')', $params);
+            }
+            return $builder;
+        };
+        $total = $base()->count();
+        $rows = $base()->orderByDesc('created_at')->orderByDesc('id')
+            ->limit($size)->offset(($p - 1) * $size)
+            ->get(['id', 'title', 'highlight_style', 'view_count', 'reply_count', 'forum_id', 'user_id', 'created_at'])
+            ->map->toArray()->all();
+        $rows = attach_topic_list_users($rows);
+        $forums = [];
+        foreach (forums_cache() as $forum) $forums[(int)$forum['id']] = (string)$forum['name'];
+        $pinned_ids = pinned_topic_ids();
+        foreach ($rows as &$row) {
+            $row['forum_name'] = (string)($forums[(int)$row['forum_id']] ?? '—');
+            $row['is_pinned'] = in_array((int)$row['id'], $pinned_ids, true) ? 1 : 0;
+            $row['created_time'] = date('Y-m-d H:i', (int)$row['created_at']);
+            $row['current_color'] = topic_title_color((string)$row['highlight_style']);
+            $row['is_bold'] = topic_title_is_bold((string)$row['highlight_style']);
+        }
+        unset($row);
+        return [
+            'rows' => $rows,
+            'total' => $total,
+            'q' => $q,
+            'fid' => $fid,
+            'forums' => $forums,
+            'page' => $p,
+            'pagination' => pagination_data(false, $total, $p, $size, admin_url(['tab' => 'topics', 'q' => $q !== '' ? $q : null, 'fid' => $fid > 0 ? $fid : null])),
+        ];
+    }
+
+    /** 后台帖子管理的行内操作：置顶/取消置顶、高亮样式（颜色 + 加粗 + 清除） */
+    public static function topics_handle_post(): void
+    {
+        require_post();
+        if (!can_manage()) err('无权限');
+        $t = Topic::find(id())?->toArray() ?: err('主题不存在');
+        $do = (string)($_POST['do'] ?? '');
+        if ($do === 'pin' || $do === 'unpin') {
+            set_pinned_topic((int)$t['id'], $do === 'pin');
+            set_flash($do === 'pin' ? '主题已置顶' : '主题已取消置顶');
+        } elseif ($do === 'highlight') {
+            $style = '';
+            if ((string)($_POST['clear'] ?? '') !== '1') {
+                $color = topic_title_color((string)$t['highlight_style']);
+                $raw_color = trim((string)($_POST['color'] ?? ''));
+                if ($raw_color !== '') $color = preg_match('/^#[0-9a-fA-F]{6}$/', $raw_color, $m) ? $m[0] : '#d94b4b';
+                $style = topic_title_style($color, isset($_POST['bold']));
+            }
+            Topic::whereKey((int)$t['id'])->update(['highlight_style' => $style]);
+            set_flash('标题样式已更新');
+        } else {
+            err('参数错误');
+        }
+        go(self::list_back_url('topics'));
+    }
+
+    /** 后台用户管理列表：用户名/邮箱搜索 + 分页，带主题/回帖计数 */
+    public static function users_view(): array
+    {
+        $q = trim((string)($_GET['q'] ?? ''));
+        $p = max(1, (int)($_GET['p'] ?? 1));
+        $size = 30;
+        $base = static function () use ($q) {
+            $builder = User::query()->select(['id', 'username', 'email', 'group_id', 'is_muted', 'created_at', 'last_post_at'])->withCount(['topics', 'replies']);
+            if ($q !== '') {
+                $pattern = search_like_pattern($q);
+                $builder->where(static fn($sub) => $sub->where('username', 'like', $pattern)->orWhere('email', 'like', $pattern));
+            }
+            return $builder;
+        };
+        $total = $base()->count();
+        $rows = $base()->orderByDesc('created_at')->orderByDesc('id')
+            ->limit($size)->offset(($p - 1) * $size)->get()->map->toArray()->all();
+        foreach ($rows as &$row) {
+            $row['group_name'] = (string)(group_by_id((int)$row['group_id'])['name'] ?? '—');
+            $row['created_time'] = date('Y-m-d H:i', (int)$row['created_at']);
+            $row['last_post_time'] = (int)$row['last_post_at'] > 0 ? date('Y-m-d H:i', (int)$row['last_post_at']) : '—';
+        }
+        unset($row);
+        return [
+            'rows' => $rows,
+            'total' => $total,
+            'q' => $q,
+            'page' => $p,
+            'pagination' => pagination_data(false, $total, $p, $size, admin_url(['tab' => 'users', 'q' => $q !== '' ? $q : null])),
+        ];
+    }
+
+    /** 后台用户管理的行内操作：禁言/解禁（不能操作自己与超级管理员） */
+    public static function users_handle_post(): void
+    {
+        require_post();
+        if (!can_manage()) err('无权限');
+        $target = User::find(id()) ?: err('用户不存在');
+        $target_id = (int)$target->id;
+        if ($target_id === uid()) err('不能操作自己的账号');
+        if ($target_id === 1) err('不能操作超级管理员');
+        $do = (string)($_POST['do'] ?? '');
+        if ($do === 'mute' || $do === 'unmute') {
+            User::whereKey($target_id)->update(['is_muted' => $do === 'mute' ? 1 : 0]);
+            set_flash($do === 'mute' ? '用户已禁言' : '用户已解除禁言');
+        } else {
+            err('参数错误');
+        }
+        go(self::list_back_url('users'));
+    }
+
+    /** 管理员编辑用户：调整用户组、重置密码（改密后该用户的登录态自动失效）、禁言 */
+    public static function save_user_admin(): void
+    {
+        if (!can_manage()) err('无权限');
+        $target = User::find(id()) ?: err('用户不存在');
+        $target_id = (int)$target->id;
+        if ($target_id === 1) err('不能修改超级管理员');
+        if ($target_id === uid()) err('请在个人设置中修改自己的资料');
+        $gid = (int)($_POST['group_id'] ?? 0);
+        if (!group_by_id($gid)) err('用户组不存在');
+        $values = ['group_id' => $gid, 'is_muted' => isset($_POST['is_muted']) ? 1 : 0];
+        $pwd = (string)($_POST['password'] ?? '');
+        if ($pwd !== '') {
+            require_password_length($pwd);
+            $values['password'] = password_hash($pwd, PASSWORD_DEFAULT);
+        }
+        User::whereKey($target_id)->update($values);
+        set_flash('用户资料已更新');
+    }
+
+    /** 数据报表：日期范围筛选，汇总卡片 + 每日新增帖子/新增用户/浏览量 */
+    public static function report_view(): array
+    {
+        $today = date('Y-m-d');
+        $to = self::report_date_param((string)($_GET['to'] ?? '')) ?: $today;
+        $from = self::report_date_param((string)($_GET['from'] ?? '')) ?: date('Y-m-d', strtotime($to . ' -6 days'));
+        if ($from > $to) [$from, $to] = [$to, $from];
+        if ($from < date('Y-m-d', strtotime($to . ' -365 days'))) $from = date('Y-m-d', strtotime($to . ' -365 days'));
+        $from_ts = (int)strtotime($from . ' 00:00:00');
+        $to_ts = (int)strtotime($to . ' 23:59:59');
+        $views = ViewStat::whereBetween('view_date', [$from, $to])->pluck('views', 'view_date');
+        $posts_by_day = self::count_by_day(Topic::whereBetween('created_at', [$from_ts, $to_ts])->pluck('created_at')->all());
+        $users_by_day = self::count_by_day(User::whereBetween('created_at', [$from_ts, $to_ts])->pluck('created_at')->all());
+        $rows = [];
+        $totals = ['posts' => 0, 'users' => 0, 'views' => 0];
+        for ($date = $from; $date <= $to; $date = date('Y-m-d', strtotime($date . ' +1 day'))) {
+            $row = ['date' => $date, 'posts' => $posts_by_day[$date] ?? 0, 'users' => $users_by_day[$date] ?? 0, 'views' => (int)($views[$date] ?? 0)];
+            $totals['posts'] += $row['posts'];
+            $totals['users'] += $row['users'];
+            $totals['views'] += $row['views'];
+            $rows[] = $row;
+        }
+        $max = 1;
+        foreach ($rows as $row) $max = max($max, $row['posts'], $row['users'], $row['views']);
+        foreach ($rows as &$row) {
+            $row['posts_pct'] = (int)round($row['posts'] / $max * 100);
+            $row['users_pct'] = (int)round($row['users'] / $max * 100);
+            $row['views_pct'] = (int)round($row['views'] / $max * 100);
+        }
+        unset($row);
+        $quick = [];
+        foreach (['今天' => 0, '最近7天' => 6, '最近30天' => 29] as $label => $days) {
+            $quick_from = date('Y-m-d', strtotime($today . ' -' . $days . ' days'));
+            $quick[] = ['label' => $label, 'href' => admin_url(['tab' => 'report', 'from' => $quick_from, 'to' => $today]), 'active' => $from === $quick_from && $to === $today];
+        }
+        return [
+            'from' => $from,
+            'to' => $to,
+            'rows' => $rows,
+            'totals' => $totals,
+            'posts_total' => Topic::count(),
+            'users_total' => User::count(),
+            'quick' => $quick,
+        ];
+    }
+
+    /** 校验 Y-m-d 日期参数，非法返回空串 */
+    private static function report_date_param(string $value): string
+    {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) return '';
+        $ts = strtotime($value);
+        return $ts > 0 ? date('Y-m-d', $ts) : '';
+    }
+
+    /** 把一组 unix 秒按站点时区归到 Y-m-d 计数 */
+    private static function count_by_day(array $timestamps): array
+    {
+        $counts = [];
+        foreach ($timestamps as $ts) {
+            $date = date('Y-m-d', (int)$ts);
+            $counts[$date] = ($counts[$date] ?? 0) + 1;
+        }
+        return $counts;
+    }
+
+    /** 行内操作后回到原列表位置（保留搜索词与页码，隐藏字段随表单提交） */
+    private static function list_back_url(string $tab): string
+    {
+        return admin_url(['tab' => $tab, 'q' => trim((string)($_POST['q'] ?? '')) ?: null, 'p' => max(1, (int)($_POST['p'] ?? 1))]);
     }
 }

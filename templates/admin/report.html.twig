@@ -1,0 +1,31 @@
+{% extends 'admin/layout.html.twig' %}
+{% block admin_body %}
+    <div class="tab-bar admin-tabs report-quick">
+        {% for item in quick %}<a class="tab{{ item.active ? ' active' : '' }}" href="{{ item.href }}">{{ item.label }}</a>{% endfor %}
+    </div>
+    <form class="admin-filter" method="get" action="{{ admin_url() }}">
+        <input type="hidden" name="tab" value="report">
+        <label class="admin-filter-date">开始 <input type="date" name="from" value="{{ from }}"></label>
+        <label class="admin-filter-date">结束 <input type="date" name="to" value="{{ to }}"></label>
+        <button type="submit">查询</button>
+    </form>
+    <div class="report-cards">
+        <div class="report-card"><span class="report-card-num">{{ totals.posts }}</span><span class="report-card-label">新增帖子</span><span class="report-card-sub">{{ from }} ~ {{ to }}</span></div>
+        <div class="report-card"><span class="report-card-num">{{ totals.users }}</span><span class="report-card-label">新增用户</span><span class="report-card-sub">{{ from }} ~ {{ to }}</span></div>
+        <div class="report-card"><span class="report-card-num">{{ totals.views }}</span><span class="report-card-label">浏览量</span><span class="report-card-sub">{{ from }} ~ {{ to }}</span></div>
+        <div class="report-card"><span class="report-card-num">{{ posts_total }}</span><span class="report-card-label">帖子总数</span><span class="report-card-sub">全站累计</span></div>
+        <div class="report-card"><span class="report-card-num">{{ users_total }}</span><span class="report-card-label">用户总数</span><span class="report-card-sub">全站累计</span></div>
+    </div>
+    <table class="list admin-bulk-list report-table">
+        <tr><th>日期</th><th>新增帖子</th><th>新增用户</th><th>浏览量</th></tr>
+        {% for row in rows %}
+            <tr>
+                <td>{{ row.date }}</td>
+                <td><span class="report-metric"><span class="report-bar" style="width: {{ row.posts_pct }}%"></span><span>{{ row.posts }}</span></span></td>
+                <td><span class="report-metric"><span class="report-bar" style="width: {{ row.users_pct }}%"></span><span>{{ row.users }}</span></span></td>
+                <td><span class="report-metric"><span class="report-bar report-bar-views" style="width: {{ row.views_pct }}%"></span><span>{{ row.views }}</span></span></td>
+            </tr>
+        {% endfor %}
+        <tr class="report-total-row"><td>合计</td><td>{{ totals.posts }}</td><td>{{ totals.users }}</td><td>{{ totals.views }}</td></tr>
+    </table>
+{% endblock %}

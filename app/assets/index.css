@@ -3906,3 +3906,151 @@ table.list{
 .markdown-field .EasyMDEContainer .editor-preview pre,
 .markdown-field .EasyMDEContainer .editor-preview-side pre{margin: var(--sp-3) 0}
 .editor-preview-empty{margin: 0; color: var(--ink-4); font-size: var(--fs-md)}
+
+/* ==========================================================================
+   14. 后台：帖子管理 / 用户管理 / 数据报表
+   ========================================================================== */
+
+.admin-filter{
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    margin: 0 0 var(--sp-4)
+}
+
+.admin-filter input[type="search"],
+.admin-filter select,
+.admin-filter input[type="date"]{
+    width: auto;
+    min-height: 34px;
+    min-width: 170px;
+    padding: 0 var(--sp-3);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    color: var(--ink);
+    font-size: var(--fs-md)
+}
+
+.admin-filter button{
+    min-height: 34px;
+    padding: 0 var(--sp-4);
+    border: none;
+    border-radius: var(--r-md);
+    background: var(--brand-strong);
+    color: #fff;
+    font-size: var(--fs-md);
+    cursor: pointer
+}
+
+.admin-filter a{color: var(--info); font-size: var(--fs-sm)}
+
+.admin-filter-total{margin-left: auto; color: var(--ink-4); font-size: var(--fs-sm)}
+
+.admin-filter-date{
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    color: var(--ink-3);
+    font-size: var(--fs-sm);
+    white-space: nowrap
+}
+
+.admin-topic-link{font-weight: 600}
+
+.admin-topic-meta{
+    display: block;
+    margin-top: 2px;
+    color: var(--ink-4);
+    font-size: var(--fs-xs)
+}
+
+.admin-highlight-form{
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--sp-1)
+}
+
+.admin-highlight-form input[type="color"]{
+    width: 30px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm);
+    background: var(--surface);
+    cursor: pointer
+}
+
+.admin-bold-check{
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    color: var(--ink-3);
+    font-size: var(--fs-xs);
+    cursor: pointer
+}
+
+.admin-user-meta{
+    margin: 0 0 var(--sp-4);
+    padding: var(--sp-3) var(--sp-4);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    background: var(--surface-2);
+    color: var(--ink-3);
+    font-size: var(--fs-sm)
+}
+
+.admin-user-meta p{margin: 0 0 var(--sp-1)}
+
+.admin-user-meta p:last-child{margin-bottom: 0}
+
+.admin-back-link{margin-left: var(--sp-3); color: var(--ink-3); font-size: var(--fs-sm)}
+
+.report-quick{margin-bottom: var(--sp-3)}
+
+.report-cards{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: var(--sp-3);
+    margin: 0 0 var(--sp-5)
+}
+
+.report-card{
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--sp-3) var(--sp-4);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    background: var(--surface)
+}
+
+.report-card-num{color: var(--brand-strong); font-size: var(--fs-3xl); font-weight: 700}
+
+.report-card-label{color: var(--ink-2); font-size: var(--fs-sm); font-weight: 600}
+
+.report-card-sub{color: var(--ink-4); font-size: var(--fs-xs)}
+
+.report-metric{
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    min-width: 96px;
+    min-height: 24px;
+    padding-left: var(--sp-2)
+}
+
+.report-bar{
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    left: 0;
+    background: var(--brand-soft);
+    border-radius: var(--r-sm)
+}
+
+.report-bar-views{background: var(--info-soft)}
+
+.report-total-row td{font-weight: 700}

@@ -1,0 +1,21 @@
+{% extends 'admin/layout.html.twig' %}
+{% import 'macros/form.html.twig' as f %}
+{% block admin_body %}
+    <div class="form-panel">
+        <h2>编辑用户 #{{ user.id }}</h2>
+        <div class="admin-user-meta">
+            <p>用户名：<strong>{{ user.username }}</strong>　邮箱：{{ user.email != '' ? user.email : '—' }}</p>
+            <p>注册时间：{{ registered_at }}　主题 {{ user.topics_count }} 篇　回帖 {{ user.replies_count }} 条</p>
+        </div>
+        <form method="post" action="{{ admin_url({do: 'edit', type: 'user', id: user.id}) }}">
+            {{ f.token() }}
+            <input type="hidden" name="type" value="user">
+            <input type="hidden" name="id" value="{{ user.id }}">
+            {{ f.select_input('用户组', 'group_id', user.group_id, group_options) }}
+            {{ f.input('重置密码', 'password', '', 'text', false, '留空表示不修改；修改后该用户的登录状态会自动失效') }}
+            {{ f.checkbox('禁言', 'is_muted', user.is_muted > 0, '勾选后该用户将不能发帖和回帖') }}
+            <button>保存</button>
+            <a class="admin-back-link" href="{{ admin_url({tab: 'users'}) }}">返回用户列表</a>
+        </form>
+    </div>
+{% endblock %}

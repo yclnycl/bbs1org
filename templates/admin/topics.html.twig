@@ -1,0 +1,48 @@
+{% extends 'admin/layout.html.twig' %}
+{% import 'macros/ui.html.twig' as ui %}
+{% import 'macros/form.html.twig' as f %}
+{% block admin_body %}
+    <form class="admin-filter" method="get" action="{{ admin_url() }}">
+        <input type="hidden" name="tab" value="topics">
+        <select name="fid">
+            <option value="">全部版块</option>
+            {% for option_id, option_name in forums %}<option value="{{ option_id }}"{{ fid == option_id ? ' selected' : '' }}>{{ option_name }}</option>{% endfor %}
+        </select>
+        <input type="search" name="q" value="{{ q }}" placeholder="按标题搜索">
+        <button type="submit">筛选</button>
+        {% if q != '' or fid > 0 %}<a href="{{ admin_url({tab: 'topics'}) }}">清空条件</a>{% endif %}
+        <span class="admin-filter-total">共 {{ total }} 个主题</span>
+    </form>
+    <table class="list admin-bulk-list">
+        <tr><th>主题</th><th>回复</th><th>浏览</th><th>标题样式</th><th>操作</th></tr>
+        {% for t in rows %}
+            <tr>
+                <td>
+                    {% if t.is_pinned == 1 %}<span class="topic-badge pinned">置顶</span>{% endif %}
+                    <a class="admin-topic-link" href="{{ route_url('topic', {id: t.id}) }}"{{ t.highlight_style != '' ? ' style="' ~ t.highlight_style|e ~ '"' : '' }}>{{ t.title }}</a>
+                    <small class="admin-topic-meta">{{ t.forum_name }} · {{ t.username }} · {{ t.created_time }}</small>
+                </td>
+                <td>{{ t.reply_count }}</td>
+                <td>{{ t.view_count }}</td>
+                <td>
+                    <form class="post-action-form admin-highlight-form" method="post" action="{{ admin_url({tab: 'topics'}) }}">
+                        {{ f.token() }}
+                        {{ f.hidden({do: 'highlight', id: t.id, q: q, p: page}) }}
+                        <input type="color" name="color" value="{{ t.current_color != '' ? t.current_color : '#d94b4b' }}" title="标题颜色">
+                        <label class="admin-bold-check"><input type="checkbox" name="bold" value="1"{{ t.is_bold ? ' checked' : '' }}>粗体</label>
+                        <button type="submit">应用</button>
+                        <button type="submit" name="clear" value="1"{{ t.highlight_style == '' ? ' disabled' : '' }}>清除</button>
+                    </form>
+                </td>
+                <td class="ops">
+                    <a href="{{ route_url('topic_edit', {id: t.id}) }}">编辑</a>
+                    {{ f.action_form(admin_url({tab: 'topics'}), t.is_pinned == 1 ? '取消置顶' : '置顶', {do: t.is_pinned == 1 ? 'unpin' : 'pin', id: t.id, q: q, p: page}) }}
+                    {{ f.action_form(admin_url({do: 'delete'}), '删除', {type: 'topics', id: t.id, q: q, p: page}, 'danger', '确定删除该主题及其全部回帖？') }}
+                </td>
+            </tr>
+        {% else %}
+            <tr><td colspan="5">没有找到匹配的主题</td></tr>
+        {% endfor %}
+    </table>
+    {% if pagination %}<div class="pagination-bar">{{ ui.pagination(pagination.total, pagination.page, pagination.size, pagination.url, pagination.limited) }}</div>{% endif %}
+{% endblock %}

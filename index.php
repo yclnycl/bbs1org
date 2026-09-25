@@ -14,6 +14,7 @@ use app\optional\Model\Setting;
 use app\optional\Model\Topic;
 use app\optional\Model\TopicDeletion;
 use app\optional\Model\User;
+use app\optional\Model\ViewStat;
 use app\optional\Search;
 if (!is_file(__DIR__ . '/vendor/autoload.php')) {
     header('Content-Type: text/plain; charset=utf-8');
@@ -499,6 +500,15 @@ function mark_viewed(int $tid): bool
     app_cookie('__viewed_topics', $value, time() + COOKIE_TTL, false);
     $_COOKIE['__viewed_topics'] = $value;
     return true;
+}
+/** 每日浏览量 +1：只服务于后台报表，失败静默，绝不影响正常浏览 */
+function record_view_stat(): void
+{
+    try {
+        $row = ViewStat::firstOrCreate(['view_date' => date('Y-m-d')], ['views' => 0]);
+        ViewStat::whereKey($row->getKey())->increment('views');
+    } catch (Throwable) {
+    }
 }
 function mobile_menu_content_html(?array $mine = null, ?array $forums = null): string
 {
@@ -1812,6 +1822,7 @@ function topic_page(): void
     if ($forum && !forum_group_allowed($forum, 'allow_view_groups')) err('无权限');
     if (mark_viewed((int)$t['id'])) {
         Topic::whereKey($t['id'])->increment('view_count');
+        record_view_stat();
         $t['view_count'] = (int)$t['view_count'] + 1;
     }
     $size = max(1, (int)setting('replies_per_page', '50'));
@@ -1927,7 +1938,7 @@ function reply_edit_page(): void
 function admin_tabs(): array
 {
     $items = [];
-    foreach (['settings' => '设置', 'forums' => '版块', 'groups' => '用户组'] as $key => $label) {
+    foreach (['settings' => '设置', 'forums' => '版块', 'groups' => '用户组', 'topics' => '帖子管理', 'users' => '用户管理', 'report' => '数据报表'] as $key => $label) {
         $items[$key] = ['label' => $label, 'href' => admin_url(['tab' => $key])];
     }
     return $items;

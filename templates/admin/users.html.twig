@@ -1,0 +1,39 @@
+{% extends 'admin/layout.html.twig' %}
+{% import 'macros/ui.html.twig' as ui %}
+{% import 'macros/form.html.twig' as f %}
+{% block admin_body %}
+    <form class="admin-filter" method="get" action="{{ admin_url() }}">
+        <input type="hidden" name="tab" value="users">
+        <input type="search" name="q" value="{{ q }}" placeholder="按用户名或邮箱搜索">
+        <button type="submit">搜索</button>
+        {% if q != '' %}<a href="{{ admin_url({tab: 'users'}) }}">清空条件</a>{% endif %}
+        <span class="admin-filter-total">共 {{ total }} 个用户</span>
+    </form>
+    <table class="list admin-bulk-list">
+        <tr><th>ID</th><th>用户名</th><th>用户组</th><th>邮箱</th><th>主题/回帖</th><th>状态</th><th>注册时间</th><th>最后发言</th><th>操作</th></tr>
+        {% for u in rows %}
+            <tr>
+                <td>{{ u.id }}</td>
+                <td><a href="{{ route_url('user', {id: u.id}) }}">{{ u.username }}</a></td>
+                <td>{{ u.group_name }}</td>
+                <td>{{ u.email != '' ? u.email : '—' }}</td>
+                <td>{{ u.topics_count }} / {{ u.replies_count }}</td>
+                <td><span class="admin-flag{{ u.is_muted == 1 ? ' danger' : '' }}">{{ u.is_muted == 1 ? '禁言' : '正常' }}</span></td>
+                <td>{{ u.created_time }}</td>
+                <td>{{ u.last_post_time }}</td>
+                <td class="ops">
+                    {% if u.id != uid() and u.id != 1 %}
+                        <a href="{{ admin_url({do: 'edit', type: 'user', id: u.id}) }}">编辑</a>
+                        {{ f.action_form(admin_url({tab: 'users'}), u.is_muted == 1 ? '解禁' : '禁言', {do: u.is_muted == 1 ? 'unmute' : 'mute', id: u.id, q: q, p: page}, '', u.is_muted == 1 ? '' : '确定禁言该用户？') }}
+                        {{ f.action_form(admin_url({do: 'delete'}), '删除', {type: 'users', id: u.id, q: q, p: page}, 'danger', '确定删除该用户？') }}
+                    {% else %}
+                        <span class="admin-flag">{{ u.id == 1 ? '超级管理员' : '当前账号' }}</span>
+                    {% endif %}
+                </td>
+            </tr>
+        {% else %}
+            <tr><td colspan="9">没有找到匹配的用户</td></tr>
+        {% endfor %}
+    </table>
+    {% if pagination %}<div class="pagination-bar">{{ ui.pagination(pagination.total, pagination.page, pagination.size, pagination.url, pagination.limited) }}</div>{% endif %}
+{% endblock %}

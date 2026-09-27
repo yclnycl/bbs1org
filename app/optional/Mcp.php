@@ -110,7 +110,7 @@ final class Mcp
             self::respond(['jsonrpc' => '2.0', 'id' => $msg_id, 'result' => []]);
         }
         if ($method === 'tools/list') {
-            $tools_json = self::json_text(['tools' => array_map(static fn(array $tool): array => $tool + ['annotations' => ['readOnlyHint' => !in_array($tool['name'], ['create_topic', 'create_reply'], true)]], self::tools())]);
+            $tools_json = self::json_text(['tools' => array_map(static fn(array $tool): array => $tool + ['annotations' => ['readOnlyHint' => !in_array($tool['name'], ['create_topic', 'create_reply', 'edit_topic'], true)]], self::tools())]);
             self::log_call($base_log() + ['status' => 'ok', 'result_json' => cut($tools_json, self::LOG_RESULT_MAX)]);
             self::respond(['jsonrpc' => '2.0', 'id' => $msg_id, 'result' => ['tools' => self::tools()]]);
         }
@@ -205,6 +205,12 @@ final class Mcp
                 'title' => ['type' => 'string', 'description' => '标题'],
                 'body' => ['type' => 'string', 'description' => '正文，支持 Markdown'],
             ], ['title', 'body'])],
+            ['name' => 'edit_topic', 'description' => '更新已有主题的标题与正文，可选换版块：需要是主题作者或内容管理权限，校验与网页端编辑一致。', 'inputSchema' => $schema([
+                'topic_id' => ['type' => 'integer', 'description' => '主题 ID'],
+                'title' => ['type' => 'string', 'description' => '新标题'],
+                'body' => ['type' => 'string', 'description' => '新正文，支持 Markdown'],
+                'forum_id' => ['type' => 'integer', 'description' => '可选：把主题移动到该版块'],
+            ], ['topic_id', 'title', 'body'])],
             ['name' => 'create_reply', 'description' => '回帖：与网页端同权限（版块回帖用户组、禁言、发帖间隔）。返回回帖 ID 与定位链接。', 'inputSchema' => $schema([
                 'topic_id' => ['type' => 'integer', 'description' => '主题 ID'],
                 'body' => ['type' => 'string', 'description' => '回帖内容，支持 Markdown'],
@@ -221,6 +227,7 @@ final class Mcp
             'get_topic' => self::tool_get_topic($args),
             'create_topic' => self::tool_create_topic($args),
             'create_reply' => self::tool_create_reply($args),
+            'edit_topic' => self::tool_edit_topic($args),
             'my_info' => self::tool_my_info($token),
             default => throw new McpToolException('工具不存在：' . $name),
         };
@@ -372,6 +379,31 @@ final class Mcp
             return $rid;
         });
         return self::json_text(['topic_id' => $tid, 'reply_id' => $rid, 'url' => absolute_url(route_url('topic', ['id' => $tid, 'replyid' => $rid])), 'message' => '回帖成功']);
+    }
+
+    /** 编辑主题：作者本人或内容管理权限；换版块时校验目标版块发帖权限。与网页端 save_topic 编辑分支同校验 */
+    private static function tool_edit_topic(array $args): string
+    {
+        if (!can_speak()) throw new McpToolException('当前账号被禁言，无法编辑主题', 'denied');
+        $tid = self::arg_int($args, 'topic_id', 0, 1, PHP_INT_MAX);
+        $t = Topic::find($tid)?->toArray() ?: throw new McpToolException('主题不存在');
+        if (!can_manage_topic($t)) throw new McpToolException('没有编辑该主题的权限', 'denied');
+        $title = cut(self::arg_str($args, 'title'), length_limit('title', 'max'));
+        $body = cut(self::arg_str($args, 'body'), length_limit('topic_body', 'max'));
+        if ($title === '' || $body === '') throw new McpToolException('标题和内容不能为空');
+        self::check_min_length($title, length_limit('title', 'min'), '标题');
+        self::check_min_length($body, length_limit('topic_body', 'min'), '主题内容');
+        $fid = (int)$t['forum_id'];
+        $target_fid = self::arg_int($args, 'forum_id', 0, 0, PHP_INT_MAX);
+        if ($target_fid > 0 && $target_fid !== $fid) {
+            $forum = forum_by_id($target_fid) ?: throw new McpToolException('目标版块不存在');
+            if (!forum_group_allowed($forum, 'allow_post_groups')) throw new McpToolException('没有在目标版块发帖的权限', 'denied');
+            $fid = $target_fid;
+        }
+        Database::connection()->transaction(static function () use ($tid, $fid, $title, $body): void {
+            Topic::whereKey($tid)->update(['forum_id' => $fid, 'title' => $title, 'body' => $body]);
+        });
+        return self::json_text(['topic_id' => $tid, 'forum_id' => $fid, 'url' => absolute_url(route_url('topic', ['id' => $tid])), 'message' => '主题已更新']);
     }
 
     private static function tool_my_info(ApiToken $token): string

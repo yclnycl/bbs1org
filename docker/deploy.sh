@@ -177,6 +177,7 @@ package_release() {
         --exclude=./docker/.opcache.dev.ini \
         --exclude=./app/data \
         --exclude='./*.log' \
+        --exclude='./*.sqlite' \
         . | run "mkdir -p '$RELEASES/$STAMP' && tar xzf - -C '$RELEASES/$STAMP'"
     run "test -f '$RELEASES/$STAMP/index.php'" || fail "上传后没找到 index.php，检查 tar 是否正常"
 }

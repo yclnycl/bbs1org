@@ -103,6 +103,10 @@ location ~ ^/(?:vendor|templates|docs)(?:/|$) {
 location ~ ^/app/.*\.php$ {
     deny all;
 }
+# SQLite 数据库文件一律不允许通过 HTTP 读取
+location ~ \.sqlite$ {
+    deny all;
+}
 ```
 
 Apache 可在网站根目录的 `.htaccess` 中加入：
@@ -112,6 +116,7 @@ RewriteEngine On
 RewriteRule ^app/(data|cache|plugins|optional)(/|$) - [F,L]
 RewriteRule ^(vendor|templates|docs)(/|$) - [F,L]
 RewriteRule ^app/.*\.php$ - [F,L]
+RewriteRule \.sqlite$ - [F,L]
 ```
 
 页面地址形如 `/`、`/login`、`/topic/12`、`/admin?tab=groups`：路由名是路径首段，纯数字的第二段是 id，其余参数留在查询串上。**这要求 Web 服务把不存在的路径回落到 `index.php`**，否则所有内页都会 404。
@@ -216,6 +221,17 @@ TURNSTILE_HOSTNAMES=localhost,127.0.0.1     # 线上填 cncttc.com,www.cncttc.co
 - **每次调用（含鉴权失败与被拒绝）都写入 `app_api_logs` 审计表**：用户、令牌、工具、参数与结果摘要（截断保存）、来源 IP、耗时、状态（成功/被拒绝/未授权/错误）。后台「MCP日志」标签页可按状态/工具/用户筛选查看，管理员可一键清空
 - 令牌创建与吊销本身也记入审计日志
 - MCP 端点不受 CSRF 双提交约束（不依赖 Cookie 鉴权），但同样不豁免任何业务权限检查
+
+## SEO：sitemap 与 robots.txt
+
+面向搜索引擎的机器接口随站点自动提供，无需配置：
+
+- `/sitemap.xml`：sitemap 索引，指向页面清单与主题清单分片
+- `/sitemap-pages.xml`：首页与各版块列表页，`<lastmod>` 取该版块最新回帖时间
+- `/sitemap-topics-{n}.xml`：主题页清单，按 id 升序每 10000 条一个分片文件，`<lastmod>` 随最新回帖更新
+- `/robots.txt`：全站禁止抓取后台、登录注册、编辑与表单页，并声明 sitemap 位置
+
+sitemap 只收录**游客可见**的版块与主题：版块的用户组浏览限制（`allow_view_groups`）把游客挡在外面时，该版块及其主题不会进入 sitemap。Google Search Console、Bing Webmaster、百度搜索资源平台、360 与搜狗站长平台均支持标准 sitemap 协议，直接提交 `/sitemap.xml` 即可。
 
 ## 数据层
 

@@ -2008,11 +2008,120 @@ function preview_route(): void
     need_login();
     json_response(['ok' => 1, 'html' => markdown_html((string)($_POST['body'] ?? ''), id('topic_id'))]);
 }
+/** sitemap 单文件 URL 数量上限：协议上限 5 万条/50MB，按 1 万条切分留足余量 */
+const SITEMAP_TOPICS_PER_FILE = 10000;
+
+/** 游客（即爬虫）可见的版块：allow_view_groups 为空表示不限制，否则须显式包含游客组 0 */
+function sitemap_viewable_forums(): array
+{
+    return array_values(array_filter(forums_cache(), static function (array $f): bool {
+        $ids = forum_group_ids($f, 'allow_view_groups');
+        return $ids === [] || in_array(0, $ids, true);
+    }));
+}
+
+/** sitemap 的 W3C Datetime 时间格式：站点时区带偏移量（如 2026-09-25T12:00:00+08:00） */
+function sitemap_w3c(int $ts): string
+{
+    return date('Y-m-d\TH:i:sP', $ts);
+}
+
+/** sitemap 的 <url> 条目：lastmod 小于等于 0 时省略（协议允许省略） */
+function sitemap_url_xml(string $loc, int $lastmod = 0): string
+{
+    $lines = ['    <loc>' . h($loc) . '</loc>'];
+    if ($lastmod > 0) $lines[] = '    <lastmod>' . sitemap_w3c($lastmod) . '</lastmod>';
+    return "  <url>\n" . implode("\n", $lines) . "\n  </url>";
+}
+
+/** 主题的 <lastmod>：回帖会刷新 last_reply_at，取两者较大值兜底（旧数据可能为 0） */
+function sitemap_topic_lastmod(array $t): int
+{
+    return max((int)($t['last_reply_at'] ?? 0), (int)($t['created_at'] ?? 0));
+}
+
+/** 机器可读出口（sitemap）：与 json_response 同级的直出，不走 render_page */
+function sitemap_xml_response(string $xml): never
+{
+    header('Content-Type: application/xml; charset=UTF-8');
+    header('Cache-Control: public, max-age=3600');
+    echo $xml;
+    exit;
+}
+
+/** /sitemap.xml：sitemapindex，页面清单一张 + 主题清单按上限切分的若干张 */
+function sitemap_index_route(): void
+{
+    $forum_ids = array_map(static fn(array $f): int => (int)$f['id'], sitemap_viewable_forums());
+    $latest = $forum_ids ? (int)Topic::whereIn('forum_id', $forum_ids)->max('last_reply_at') : 0;
+    $maps = ['  <sitemap><loc>' . h(absolute_url(app_url('sitemap-pages.xml'))) . '</loc>'
+        . ($latest > 0 ? '<lastmod>' . sitemap_w3c($latest) . '</lastmod>' : '') . '</sitemap>'];
+    if ($forum_ids) {
+        $files = (int)ceil(Topic::whereIn('forum_id', $forum_ids)->count() / SITEMAP_TOPICS_PER_FILE);
+        for ($i = 1; $i <= $files; $i++) {
+            $maps[] = '  <sitemap><loc>' . h(absolute_url(app_url("sitemap-topics-{$i}.xml"))) . '</loc></sitemap>';
+        }
+    }
+    sitemap_xml_response('<?xml version="1.0" encoding="UTF-8"?>' . "\n"
+        . '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n"
+        . implode("\n", $maps) . "\n</sitemapindex>\n");
+}
+
+/** /sitemap-pages.xml：首页 + 游客可见版块列表页，lastmod 取该版块最新回帖时间 */
+function sitemap_pages_route(): void
+{
+    $urls = [sitemap_url_xml(absolute_url(app_url()))];
+    foreach (sitemap_viewable_forums() as $f) {
+        $fid = (int)$f['id'];
+        $urls[] = sitemap_url_xml(absolute_url(route_url('forum', ['id' => $fid])), (int)Topic::where('forum_id', $fid)->max('last_reply_at'));
+    }
+    sitemap_xml_response('<?xml version="1.0" encoding="UTF-8"?>' . "\n"
+        . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n"
+        . implode("\n", $urls) . "\n</urlset>\n");
+}
+
+/** /sitemap-topics-{n}.xml：游客可见主题按 id 升序每 1 万条一个文件，超出分片数报 404 */
+function sitemap_topics_route(int $page): void
+{
+    $forum_ids = array_map(static fn(array $f): int => (int)$f['id'], sitemap_viewable_forums());
+    $query = Topic::whereIn('forum_id', $forum_ids);
+    $total = (clone $query)->count();
+    if ($page < 1 || $page > max(1, (int)ceil($total / SITEMAP_TOPICS_PER_FILE))) err('你访问的页面不存在', 404);
+    $rows = $query->orderBy('id')->limit(SITEMAP_TOPICS_PER_FILE)->offset(($page - 1) * SITEMAP_TOPICS_PER_FILE)
+        ->get(['id', 'created_at', 'last_reply_at']);
+    $urls = [];
+    foreach ($rows as $t) {
+        $urls[] = sitemap_url_xml(absolute_url(route_url('topic', ['id' => (int)$t->id])), sitemap_topic_lastmod($t->toArray()));
+    }
+    sitemap_xml_response('<?xml version="1.0" encoding="UTF-8"?>' . "\n"
+        . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n"
+        . ($urls ? implode("\n", $urls) . "\n" : '') . '</urlset>' . "\n");
+}
+
+/** /robots.txt：后台、登录注册、编辑与表单等对爬虫无意义的路径全站禁止，并声明 sitemap 位置 */
+function robots_txt_route(): void
+{
+    $lines = ['User-agent: *'];
+    // 路径形如 /{a}/{id}，首段即路由名；个人资料页是登录后的设置页，与后台一并禁抓
+    foreach (['admin', 'login', 'logout', 'register', 'profile', 'form_error', 'preview', 'mobile_menu', 'delete', 'topic_edit', 'reply_edit', 'mcp', 'search'] as $a) {
+        $lines[] = 'Disallow: /' . $a;
+    }
+    $lines[] = 'Disallow: /app/';
+    $lines[] = '';
+    $lines[] = 'Sitemap: ' . absolute_url(app_url('sitemap.xml'));
+    header('Content-Type: text/plain; charset=UTF-8');
+    header('Cache-Control: public, max-age=3600');
+    echo implode("\n", $lines) . "\n";
+    exit;
+}
 function core_routes(): array
 {
     return [
         'home' => 'home_page',
         'search' => [Search::class, 'page'],
+        'sitemap.xml' => 'sitemap_index_route',
+        'sitemap-pages.xml' => 'sitemap_pages_route',
+        'robots.txt' => 'robots_txt_route',
         'mobile_menu' => 'mobile_menu_route',
         'preview' => 'preview_route',
         'forum' => 'forum_page',
@@ -2043,6 +2152,8 @@ try {
     $route = (string)($_GET['a'] ?? 'home');
     $handler = core_routes()[$route] ?? null;
     if ($handler !== null) $handler();
+    // 主题分片文件名带序号（/sitemap-topics-2.xml），无法静态注册进 core_routes()
+    elseif (preg_match('/^sitemap-topics-(\d+)\.xml$/D', $route, $m)) sitemap_topics_route((int)$m[1]);
     else err('你访问的页面不存在', 404);
 } catch (Throwable $e) {
     debug_log_write('未捕获异常', $e);

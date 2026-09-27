@@ -207,7 +207,7 @@ TURNSTILE_HOSTNAMES=localhost,127.0.0.1     # 线上填 cncttc.com,www.cncttc.co
 }
 ```
 
-内置工具：`site_info`（站点与版块权限概况）、`list_topics`（主题列表，支持版块/用户/标题关键词筛选与分页）、`get_topic`（正文 + 分页回帖，不累计浏览量）、`create_topic` / `create_reply`（发主题/回帖）、`edit_topic`（更新已有主题的标题/正文/版块，作者或内容管理权限）、`my_info`（当前账号与令牌信息）。
+内置工具：`site_info`（站点与版块权限概况）、`list_topics`（主题列表，支持版块/用户/标题关键词筛选与分页）、`get_topic`（正文 + 分页回帖，不累计浏览量）、`create_topic` / `create_reply`（发主题/回帖）、`edit_topic`（更新已有主题的标题/正文/版块，作者或内容管理权限）、`delete_topic`（删除主题，连回帖级联删除、不可恢复，作者或内容管理权限）、`my_info`（当前账号与令牌信息）。
 
 ### 权限与安全
 

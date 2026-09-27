@@ -110,7 +110,7 @@ final class Mcp
             self::respond(['jsonrpc' => '2.0', 'id' => $msg_id, 'result' => []]);
         }
         if ($method === 'tools/list') {
-            $tools_json = self::json_text(['tools' => array_map(static fn(array $tool): array => $tool + ['annotations' => ['readOnlyHint' => !in_array($tool['name'], ['create_topic', 'create_reply', 'edit_topic'], true)]], self::tools())]);
+            $tools_json = self::json_text(['tools' => array_map(static fn(array $tool): array => $tool + ['annotations' => ['readOnlyHint' => !in_array($tool['name'], ['create_topic', 'create_reply', 'edit_topic', 'delete_topic'], true)]], self::tools())]);
             self::log_call($base_log() + ['status' => 'ok', 'result_json' => cut($tools_json, self::LOG_RESULT_MAX)]);
             self::respond(['jsonrpc' => '2.0', 'id' => $msg_id, 'result' => ['tools' => self::tools()]]);
         }
@@ -215,6 +215,9 @@ final class Mcp
                 'topic_id' => ['type' => 'integer', 'description' => '主题 ID'],
                 'body' => ['type' => 'string', 'description' => '回帖内容，支持 Markdown'],
             ], ['topic_id', 'body'])],
+            ['name' => 'delete_topic', 'description' => '删除主题：需要是主题作者或内容管理权限。连同全部回帖一并删除（与网页端删除同路径），不可恢复。', 'inputSchema' => $schema([
+                'topic_id' => ['type' => 'integer', 'description' => '主题 ID'],
+            ], ['topic_id'])],
             ['name' => 'my_info', 'description' => '查看当前令牌对应的账号：用户名、用户组、禁言状态、令牌名称与最后使用时间。', 'inputSchema' => $schema([])],
         ];
     }
@@ -228,6 +231,7 @@ final class Mcp
             'create_topic' => self::tool_create_topic($args),
             'create_reply' => self::tool_create_reply($args),
             'edit_topic' => self::tool_edit_topic($args),
+            'delete_topic' => self::tool_delete_topic($args),
             'my_info' => self::tool_my_info($token),
             default => throw new McpToolException('工具不存在：' . $name),
         };
@@ -404,6 +408,19 @@ final class Mcp
             Topic::whereKey($tid)->update(['forum_id' => $fid, 'title' => $title, 'body' => $body]);
         });
         return self::json_text(['topic_id' => $tid, 'forum_id' => $fid, 'url' => absolute_url(route_url('topic', ['id' => $tid])), 'message' => '主题已更新']);
+    }
+
+    private static function tool_delete_topic(array $args): string
+    {
+        $tid = self::arg_int($args, 'topic_id', 0, 1, PHP_INT_MAX);
+        $t = Topic::find($tid)?->toArray() ?: throw new McpToolException('主题不存在');
+        if (!can_manage_topic($t)) throw new McpToolException('没有删除该主题的权限', 'denied');
+        // 先记回帖数再删: del() 删完主题后行就没了
+        $deleted_replies = Reply::where('topic_id', $tid)->count();
+        // del() 的 err() 分支(记录不存在/无权限)已在上面预检挡掉; 走与网页端完全相同的
+        // 删除路径: 楼层索引记录 + 级联回帖 + 主题行, 全程事务
+        del('topics', $tid, true);
+        return self::json_text(['topic_id' => $tid, 'deleted_replies' => $deleted_replies, 'message' => '主题已删除']);
     }
 
     private static function tool_my_info(ApiToken $token): string

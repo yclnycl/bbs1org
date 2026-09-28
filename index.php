@@ -2568,7 +2568,9 @@ if (!db_schema_ready()) Bootstrap::run();
 ensure_schema_bumps();
 check();
 need_site_access();
-// canonical_host_redirect() 停用：apex 与 www 都要能直接访问，不再 301 到规范域；canonical 等绝对地址仍由 site_base_url 生成
+// canonical_host_redirect() 保持停用：http→https 与 apex→www 的 301 已上移到宿主 nginx
+// （80 与裸域 443 一律 301 到 https://www.cncttc.com，见 docs/DEPLOY-PRODUCTION.md），
+// 这里再跳会变成双重重定向；canonical 等绝对地址仍由 site_base_url 生成
 try {
     if (($_GET['__route_not_found'] ?? '') === '1') {
         err(($_GET['__route_not_found_kind'] ?? '') === 'topic' ? '你访问的帖子可能已经删除' : '你访问的页面不存在', 404);

@@ -48,15 +48,21 @@ bbs1org-permissions-1  serversideup/php:8.5-fpm  一次性 chown 后退出
 
 ### 宿主 nginx（`/etc/nginx/sites-available/cncttc.com`）
 
-80 端口保留 ACME 验证路径，其余请求 **301 跳 HTTPS**（`return 301 https://$host$request_uri`）；
-443 同样反代到 `127.0.0.1:8080`，带 HSTS、`client_max_body_size 128m`、`X-Forwarded-Proto`
-（应用靠它决定 cookie 是否加 Secure）。
+规范主机是 `https://www.cncttc.com`，三个入口一律 301 过去、路径保持不变：
+
+- **80 端口**：保留 ACME 续期路径（`/.well-known/acme-challenge/` 直读 `/var/www/letsencrypt`），其余 `return 301 https://www.cncttc.com$request_uri`
+- **443 裸域块**（`server_name cncttc.com`）：`return 301 https://www.cncttc.com$request_uri`
+- **443 www 块**：反代到 `127.0.0.1:8080`，带 HSTS、`client_max_body_size 128m`、`X-Forwarded-Proto`（应用靠它决定 cookie 是否加 Secure）
+
+应用侧的 `canonical_host_redirect()` 因此保持停用（再跳会双重 301）；
+页面 canonical/og:url 仍指向 HTTPS www。
 
 > 80 端口的跳转行为有过一次反复，改之前先看这里：
-> - 2026-09-28 之前：80 端口 301 跳 HTTPS；
+> - 2026-09-28 之前：80 端口 301 跳 HTTPS（保持原主机）；
 > - 2026-09-28 白天：改为 HTTP 直出——神马站长平台的验证器只走 HTTP 且不跟随 301
 >   （日志实测 140.205.85.x 以老 Chrome UA 抓 `http://` 全部拿到 301 后报「验证失败」）；
-> - 2026-09-28 晚：按站点决策**恢复强制 301**，神马如需重新验证会拿不到验证文件，届时再临时改回直出。
+> - 2026-09-28 晚：按站点决策恢复强制 301 并收敛到 www（80 直接跳 www，裸域 443 也 301 到 www）。
+>   神马如需重新验证，把 80 块的 `location /` 临时改回反代 `127.0.0.1:8080`。
 > 改动只存在于服务器 `/etc/nginx/sites-available/cncttc.com`（不在仓库里），
 > 每次改动先 `cp -a` 留 `.bak` 备份再覆盖，`nginx -t && systemctl reload nginx` 生效。
 

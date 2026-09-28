@@ -1163,7 +1163,11 @@ function negotiate_lang(): ?string
     if (!$langs) return null;
     $cookie = strtolower(trim((string)($_COOKIE[LANG_COOKIE_NAME] ?? '')));
     if ($cookie === DEFAULT_LANG || in_array($cookie, $langs, true)) return $cookie;
-    foreach (accept_lang_prefs() as $tag) {
+    $prefs = accept_lang_prefs();
+    // 完全没有 Accept-Language 的客户端（部分工具/老爬虫）拿不到语言意图，按默认语言处理；
+    // 有语言意图但不含中文的（de/fr…）才落第一个启用语言（英文站）
+    if (!$prefs) return DEFAULT_LANG;
+    foreach ($prefs as $tag) {
         if (str_starts_with($tag, DEFAULT_LANG)) return DEFAULT_LANG;
         foreach ($langs as $lang) {
             if (str_starts_with($tag, $lang)) return $lang;

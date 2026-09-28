@@ -54,7 +54,13 @@ final class Admin
         if ($name === '') err('版块名不能为空');
         $description = post('description', DB_TEXT_MAX_LENGTH);
         $sort = (int)$_POST['sort'];
-        $values = ['name' => $name, 'description' => $description, 'sort' => $sort];
+        // 二级分类：只能挂在一版版块下，且不能挂自己（层级固定两层）
+        $parent_id = max(0, (int)($_POST['parent_id'] ?? 0));
+        if ($parent_id > 0) {
+            $parent = forum_by_id($parent_id);
+            if (!$parent || (int)$parent['parent_id'] > 0 || $parent_id === id()) err('上级版块无效（只能选择一级版块）');
+        }
+        $values = ['name' => $name, 'description' => $description, 'sort' => $sort, 'parent_id' => $parent_id, 'paid_mode' => isset($_POST['paid_mode']) ? 1 : 0];
         foreach (['allow_view_groups', 'allow_post_groups', 'allow_reply_groups'] as $field) $values[$field] = implode(',', array_values(array_unique(array_filter(array_map('intval', (array)($_POST[$field] ?? []))))));
         if (id()) Forum::whereKey(id())->update($values);
         else Forum::create($values);
@@ -163,6 +169,47 @@ final class Admin
         go(admin_url(['tab' => 'verify']));
     }
 
+    /** SEO TDK tab 的字段白名单：数值字段统一 [下限, 上限] 校验 */
+    private static function tdk_number_fields(): array
+    {
+        return [
+            'tdk_batch_size' => [1, 20], 'tdk_interval_seconds' => [60, 86400], 'tdk_timeout' => [5, 120],
+            'tdk_title_max' => [20, 60], 'tdk_description_min' => [50, 150], 'tdk_description_max' => [100, 300], 'tdk_keyword_max' => [3, 15],
+        ];
+    }
+
+    public static function tdk_view(): array
+    {
+        return [
+            'stats' => TopicTDK::stats(),
+            'settings' => settings_cache(),
+            'api_key_set' => TopicTDK::api_key() !== '',
+            'logs' => TopicTDK::recent_logs(15),
+            'models' => TopicTDK::models(),
+            'balance' => TopicTDK::balance(),
+        ];
+    }
+
+    public static function tdk_handle_post(): never
+    {
+        if ((string)($_POST['action'] ?? '') === 'run_batch') {
+            $result = TopicTDK::process_batch((int)($_POST['batch'] ?? 0));
+            if ((int)$result['skipped'] === 1) set_flash('另一个生成进程正在运行，请稍后再试');
+            else set_flash('本批完成 ' . (int)$result['done'] . ' 篇' . ((int)$result['failed'] > 0 ? '，失败 ' . (int)$result['failed'] . ' 篇（将自动重试）' : ''));
+            go(admin_url(['tab' => 'tdk']));
+        }
+        $values = [];
+        foreach (['tdk_api_base'] as $key) $values[$key] = post($key, DB_STRING_MAX_LENGTH);
+        // 模型只接受官方清单内的值，防止手改表单传入任意模型名
+        $model = (string)($_POST['tdk_model'] ?? '');
+        $values['tdk_model'] = isset(TopicTDK::models()[$model]) ? $model : 'deepseek-flash';
+        foreach (self::tdk_number_fields() as $key => [$min, $max]) $values[$key] = (string)min($max, max($min, (int)($_POST[$key] ?? 0)));
+        foreach (['tdk_enabled', 'tdk_ai_enabled'] as $key) $values[$key] = isset($_POST[$key]) ? '1' : '0';
+        save_settings_values($values);
+        set_flash('SEO TDK 设置已保存');
+        go(admin_url(['tab' => 'tdk']));
+    }
+
     public static function groups_view(): array
     {
         return ['groups' => groups_cache()];
@@ -177,6 +224,9 @@ final class Admin
                 $count = count(forum_group_ids($forum, $field));
                 $permissions[] = $label . ':' . ($count ? $count . '组' : '不限');
             }
+            if ((int)($forum['paid_mode'] ?? 0) === 1) $permissions[] = '收费模式';
+            $parent_id = (int)($forum['parent_id'] ?? 0);
+            $forum['display_name'] = $parent_id > 0 ? '└ ' . (string)(forum_by_id($parent_id)['name'] ?? $parent_id) . ' · ' . (string)$forum['name'] : (string)$forum['name'];
             $forum['permissions'] = implode(' / ', $permissions);
             $forums[] = $forum;
         }
@@ -190,20 +240,21 @@ final class Admin
         if ($tab === 'settings' && (string)($_GET['debug_log'] ?? '') === 'view') { header('Content-Type: text/plain; charset=utf-8'); echo is_file(DEBUG_LOG_FILE) ? (string)file_get_contents(DEBUG_LOG_FILE) : ''; exit; }
         if ($tab === 'settings' && is_post_request()) self::settings_handle_post();
         if ($tab === 'verify' && is_post_request()) self::verify_handle_post();
+        if ($tab === 'tdk' && is_post_request()) self::tdk_handle_post();
         if ($tab === 'topics' && is_post_request()) self::topics_handle_post();
         if ($tab === 'users' && is_post_request()) self::users_handle_post();
         if ($tab === 'mcp' && is_post_request()) self::mcp_handle_post();
         $template = match ($tab) {
             'settings' => 'admin/settings.html.twig', 'verify' => 'admin/verify.html.twig', 'groups' => 'admin/groups.html.twig', 'forums' => 'admin/forums.html.twig',
             'topics' => 'admin/topics.html.twig', 'users' => 'admin/users.html.twig', 'report' => 'admin/report.html.twig',
-            'mcp' => 'admin/mcp.html.twig',
+            'mcp' => 'admin/mcp.html.twig', 'tdk' => 'admin/tdk.html.twig',
             default => '',
         };
         if ($template === '') err('你访问的页面不存在', 404);
         $view = match ($tab) {
             'settings' => self::settings_html(), 'verify' => self::verify_view(), 'groups' => self::groups_view(), 'forums' => self::forums_view(),
             'topics' => self::topics_view(), 'users' => self::users_view(), 'report' => self::report_view(),
-            'mcp' => self::mcp_view(),
+            'mcp' => self::mcp_view(), 'tdk' => self::tdk_view(),
             default => [],
         };
         render_page($template, $view + ['tab' => $tab], '后台');
@@ -224,11 +275,17 @@ final class Admin
         if ($type === 'group') {
             $view += ['tab' => 'groups', 'group' => id() ? (group_by_id(id()) ?: err('用户组不存在')) : ['id' => 0, 'name' => '', 'allow_manage' => 0, 'allow_admin' => 0]];
         } elseif ($type === 'forum') {
-            $f = id() ? forum_by_id(id()) : ['id' => 0, 'name' => '', 'description' => '', 'sort' => 0, 'allow_view_groups' => '', 'allow_post_groups' => '', 'allow_reply_groups' => ''];
+            $f = id() ? forum_by_id(id()) : ['id' => 0, 'name' => '', 'description' => '', 'sort' => 0, 'parent_id' => 0, 'allow_view_groups' => '', 'allow_post_groups' => '', 'allow_reply_groups' => '', 'paid_mode' => 0];
             if (!$f) err('版块不存在');
             $selected = [];
             foreach (['allow_view_groups', 'allow_post_groups', 'allow_reply_groups'] as $field) $selected[$field] = forum_group_ids($f, $field);
-            $view += ['tab' => 'forums', 'forum' => $f, 'groups' => groups_cache(), 'forum_selected' => $selected];
+            // 上级版块选项：无（一级）+ 全部一版版块（自己除外），子版块不能作为上级
+            $parent_options = [0 => '无（一级版块）'];
+            foreach (forums_cache() as $pf) {
+                if ((int)$pf['id'] === id() || (int)($pf['parent_id'] ?? 0) > 0) continue;
+                $parent_options[(int)$pf['id']] = (string)$pf['name'];
+            }
+            $view += ['tab' => 'forums', 'forum' => $f, 'groups' => groups_cache(), 'forum_selected' => $selected, 'parent_options' => $parent_options];
         } elseif ($type === 'user') {
             $u = User::find(id()) ?: err('用户不存在');
             $view += ['tab' => 'users', 'user' => $u->toArray() + ['topics_count' => $u->topics()->count(), 'replies_count' => $u->replies()->count()], 'group_options' => array_column(groups_cache(), 'name', 'id'), 'registered_at' => date('Y-m-d H:i', (int)$u->created_at)];

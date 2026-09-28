@@ -3,7 +3,15 @@
 {% block content %}
     <div class="home-shell{{ shell_class ? ' ' ~ shell_class : '' }}"><div class="forum-layout forum-layout-has-sidebar">
         <div class="forum-main"><div class="main-panel">
-            {% if not profile_uid and page_h1 %}<h1 class="sr-only">{{ page_h1 }}</h1>{% endif %}
+            {% if not profile_uid and page_h1 %}
+                <header class="list-heading">
+                    <h1 class="list-title">{{ page_h1 }}</h1>
+                    {% if page_h1_sub %}<p class="list-sub">{{ page_h1_sub }}</p>{% endif %}
+                </header>
+            {% endif %}
+            {% if category_tabs %}
+                <div class="cat-tabs">{{ ui.tabs(category_tabs, category_active) }}</div>
+            {% endif %}
             {% if profile_uid %}
                 <div class="profile-toolbar">{{ ui.tabs(profile_tabs, profile_tab) }}</div>
             {% else %}

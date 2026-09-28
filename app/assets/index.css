@@ -848,6 +848,46 @@ a:focus-visible,
     margin-top: var(--sp-2)
 }
 
+/* 列表面板头部：可见的页面 h1（SEO 扫描不认 sr-only 的隐藏标题），副行为版块/站点描述 */
+.list-heading{
+    padding: var(--sp-4) var(--panel-pad) 0
+}
+
+.list-title{
+    margin: 0;
+    color: var(--ink);
+    font-size: var(--fs-2xl);
+    font-weight: 700;
+    line-height: var(--lh-tight);
+    letter-spacing: -.01em;
+    text-wrap: balance
+}
+
+.list-sub{
+    margin: var(--sp-2) 0 0;
+    color: var(--ink-3);
+    font-size: var(--fs-sm);
+    line-height: var(--lh-snug)
+}
+
+/* 头部下方工具栏收紧上边距，避免与副行之间留白过大 */
+.list-heading + .topic-toolbar{
+    padding-top: var(--sp-3)
+}
+
+/* 二级分类 tab 条（父版块/子版块页的类目筛选） */
+.cat-tabs{
+    padding: var(--sp-3) var(--panel-pad) 0
+}
+
+.cat-tabs .tab-bar{
+    margin: 0
+}
+
+.cat-tabs + .topic-toolbar{
+    padding-top: var(--sp-3)
+}
+
 .topic-toolbar,
 .profile-toolbar{
     display: flex;

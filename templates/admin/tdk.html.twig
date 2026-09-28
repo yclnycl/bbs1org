@@ -1,0 +1,65 @@
+{% extends 'admin/layout.html.twig' %}
+{% import 'macros/form.html.twig' as f %}
+{% block admin_body %}
+    <div class="form-panel settings-form">
+        <h2>生成进度</h2>
+        <p>主题总数 <strong>{{ stats.total }}</strong>，已生成 <strong>{{ stats.covered }}</strong>，待处理 <strong>{{ stats.pending }}</strong>{% if stats.failed > 0 %}，失败挂起 <strong>{{ stats.failed }}</strong>{% endif %}。</p>
+        <p>生成方式：{{ settings.tdk_ai_enabled == '1' ? (api_key_set ? 'AI（DeepSeek 接口）' : '规则兜底——未配置 API 密钥，AI 不可用') : '规则（AI 已在下方关闭）' }}；队列按主题 id 升序处理，页面访问每 {{ settings.tdk_interval_seconds }} 秒自动推进一批（每批 {{ settings.tdk_batch_size }} 篇），也可在下方手动处理。</p>
+        {% if balance %}
+            <p>账户余额：{{ balance.is_available ? '可用' : '不可用' }}{% for info in balance.infos %}，<strong>{{ info.total_balance }}</strong> {{ info.currency }}{% if info.granted_balance != '0.00' %}（含赠金 {{ info.granted_balance }}）{% endif %}{% endfor %}。</p>
+        {% elseif api_key_set %}
+            <p>账户余额：查询失败（接口或密钥异常，稍后自动重试）。</p>
+        {% endif %}
+        <form method="post">
+            {{ f.token() }}
+            <input type="hidden" name="action" value="run_batch">
+            <div class="row settings-actions"><button type="submit">立即处理一批</button></div>
+        </form>
+    </div>
+    <div class="form-panel settings-form">
+        <h2>队列日志（最近 {{ logs|length }} 条）</h2>
+        {% if logs %}
+            <table class="list admin-bulk-list">
+                <tr><th>时间</th><th>主题</th><th>方式</th><th>耗时</th><th>状态</th></tr>
+                {% for row in logs %}
+                    <tr>
+                        <td>{{ row.updated_at|date('m-d H:i') }}</td>
+                        <td>
+                            {% if row.deleted %}<span>已删除 #{{ row.topic_id }}</span>
+                            {% else %}<a href="{{ route_url('topic', {id: row.topic_id}) }}">{{ row.topic_title != '' ? row.topic_title|slice(0, 40) : '（无标题记录 #' ~ row.topic_id ~ '）' }}</a>{% endif %}
+                            {% if row.source == 'failed' and row.last_error != '' %}<br><small>{{ row.last_error }}</small>{% endif %}
+                        </td>
+                        <td>{{ {ai: 'AI', rule: '规则', failed: '失败'}[row.source] ?? row.source }}{% if row.attempts > 1 %}（重试 {{ row.attempts - 1 }} 次）{% endif %}</td>
+                        <td>{{ row.duration_ms > 0 ? (row.duration_ms / 1000)|round(1) ~ 's' : '—' }}</td>
+                        <td>
+                            {% if row.source == 'failed' %}
+                                {% if row.attempts >= 5 %}已放弃{% else %}失败待重试{% endif %}
+                            {% else %}成功{% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </table>
+        {% else %}
+            <p class="empty-state">还没有处理记录——点击上方「立即处理一批」或等待页面访问自动触发。</p>
+        {% endif %}
+    </div>
+    <div class="form-panel settings-form">
+        <h2>生成设置</h2>
+        <form method="post">
+            {{ f.token() }}
+            <input type="hidden" name="action" value="save">
+            {{ f.checkbox('启用 TDK 队列（关闭后详情页恢复默认标题与描述规则）', 'tdk_enabled', settings.tdk_enabled == '1') }}
+            {{ f.checkbox('使用 AI 生成（需在 docker/.env 配置 DEEPSEEK_API_KEY，失败自动回落规则生成）', 'tdk_ai_enabled', settings.tdk_ai_enabled == '1') }}
+            {{ f.input('接口地址', 'tdk_api_base', settings.tdk_api_base|default(''), 'text', true, 'OpenAI 兼容的 chat/completions 接口基地址') }}
+            {{ f.select_input('模型', 'tdk_model', settings.tdk_model|default(''), models, '仅提供官方模型清单内的选项') }}
+            {{ f.number_input('每批篇数', 'tdk_batch_size', settings.tdk_batch_size|default('3'), 1, 20) }}
+            {{ f.number_input('自动触发间隔（秒）', 'tdk_interval_seconds', settings.tdk_interval_seconds|default('300'), 60, 86400) }}
+            {{ f.number_input('接口超时（秒）', 'tdk_timeout', settings.tdk_timeout|default('30'), 5, 120) }}
+            {{ f.number_input('标题最长字数', 'tdk_title_max', settings.tdk_title_max|default('45'), 20, 60) }}
+            {{ f.number_input('描述最短字数', 'tdk_description_min', settings.tdk_description_min|default('100'), 50, 150) }}
+            {{ f.number_input('描述最长字数', 'tdk_description_max', settings.tdk_description_max|default('160'), 100, 300) }}
+            {{ f.number_input('关键词个数上限', 'tdk_keyword_max', settings.tdk_keyword_max|default('8'), 3, 15) }}
+            <div class="row settings-actions"><button type="submit">保存</button></div>
+        </form>
+    </div>
+{% endblock %}

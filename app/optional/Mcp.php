@@ -110,7 +110,7 @@ final class Mcp
             self::respond(['jsonrpc' => '2.0', 'id' => $msg_id, 'result' => []]);
         }
         if ($method === 'tools/list') {
-            $tools_json = self::json_text(['tools' => array_map(static fn(array $tool): array => $tool + ['annotations' => ['readOnlyHint' => !in_array($tool['name'], ['create_topic', 'create_reply', 'edit_topic', 'delete_topic'], true)]], self::tools())]);
+            $tools_json = self::json_text(['tools' => array_map(static fn(array $tool): array => $tool + ['annotations' => ['readOnlyHint' => !in_array($tool['name'], ['create_topic', 'create_reply', 'edit_topic', 'delete_topic', 'delete_topics_batch'], true)]], self::tools())]);
             self::log_call($base_log() + ['status' => 'ok', 'result_json' => cut($tools_json, self::LOG_RESULT_MAX)]);
             self::respond(['jsonrpc' => '2.0', 'id' => $msg_id, 'result' => ['tools' => self::tools()]]);
         }
@@ -186,9 +186,9 @@ final class Mcp
     {
         $schema = static fn(array $properties, array $required = []): array => ['type' => 'object', 'properties' => $properties, 'required' => $required, 'additionalProperties' => false];
         return [
-            ['name' => 'site_info', 'description' => '获取论坛概况：站点名称、当前账号、版块列表（含当前账号在各版块的浏览/发帖/回帖权限）。', 'inputSchema' => $schema([])],
-            ['name' => 'list_topics', 'description' => '主题列表：可按版块、用户、标题关键词筛选，返回标题/作者/浏览量/回复数/时间，支持分页。', 'inputSchema' => $schema([
-                'forum_id' => ['type' => 'integer', 'description' => '版块 ID，不传查全部版块'],
+            ['name' => 'site_info', 'description' => '获取论坛概况：站点名称、当前账号、版块列表（两级结构，含各版块的浏览/发帖/回帖权限；parent_id>0 的是二级分类）。', 'inputSchema' => $schema([])],
+            ['name' => 'list_topics', 'description' => '主题列表：可按版块、用户、标题关键词筛选，返回标题/作者/所属版块/浏览量/回复数/时间，支持分页。forum_id 传一级版块会聚合其全部子分类。', 'inputSchema' => $schema([
+                'forum_id' => ['type' => 'integer', 'description' => '版块 ID：可传一级版块（聚合其子分类）或二级分类，不传查全部版块'],
                 'user_id' => ['type' => 'integer', 'description' => '只看某用户的主题'],
                 'q' => ['type' => 'string', 'description' => '标题关键词'],
                 'sort' => ['type' => 'string', 'enum' => ['newest', 'last_reply'], 'description' => 'newest 按发帖时间倒序（默认），last_reply 按最后回帖时间倒序'],
@@ -200,7 +200,7 @@ final class Mcp
                 'page' => ['type' => 'integer', 'description' => '回帖页码，默认 1'],
                 'per_page' => ['type' => 'integer', 'description' => '回帖每页条数，默认 20，最大 100'],
             ], ['id'])],
-            ['name' => 'create_topic', 'description' => '发表主题：与网页端同权限（版块发帖用户组、禁言、发帖间隔）。返回新主题 ID 与链接。', 'inputSchema' => $schema([
+            ['name' => 'create_topic', 'description' => '发表主题：与网页端同权限（版块发帖用户组、禁言、发帖间隔）。forum_id 可传二级分类（用 site_info 查两级结构）；不传用第一个可发帖版块。返回新主题 ID 与链接。', 'inputSchema' => $schema([
                 'forum_id' => ['type' => 'integer', 'description' => '版块 ID，不传用第一个可发帖版块'],
                 'title' => ['type' => 'string', 'description' => '标题'],
                 'body' => ['type' => 'string', 'description' => '正文，支持 Markdown'],
@@ -218,6 +218,9 @@ final class Mcp
             ['name' => 'delete_topic', 'description' => '删除主题：需要是主题作者或内容管理权限。连同全部回帖一并删除（与网页端删除同路径），不可恢复。', 'inputSchema' => $schema([
                 'topic_id' => ['type' => 'integer', 'description' => '主题 ID'],
             ], ['topic_id'])],
+            ['name' => 'delete_topics_batch', 'description' => '批量删除主题：单次最多 500 篇，逐篇校验与 delete_topic 相同的权限（作者本人或内容管理）。每篇独立事务互不影响，与网页端同删除路径（含回帖级联），不可恢复。', 'inputSchema' => $schema([
+                'topic_ids' => ['type' => 'array', 'items' => ['type' => 'integer'], 'description' => '要删除的主题 ID 列表，单次最多 500 个'],
+            ], ['topic_ids'])],
             ['name' => 'my_info', 'description' => '查看当前令牌对应的账号：用户名、用户组、禁言状态、令牌名称与最后使用时间。', 'inputSchema' => $schema([])],
         ];
     }
@@ -232,6 +235,7 @@ final class Mcp
             'create_reply' => self::tool_create_reply($args),
             'edit_topic' => self::tool_edit_topic($args),
             'delete_topic' => self::tool_delete_topic($args),
+            'delete_topics_batch' => self::tool_delete_topics_batch($args),
             'my_info' => self::tool_my_info($token),
             default => throw new McpToolException('工具不存在：' . $name),
         };
@@ -241,10 +245,14 @@ final class Mcp
     {
         $forums = [];
         foreach (forums_cache() as $forum) {
+            $parent_id = (int)($forum['parent_id'] ?? 0);
             $forums[] = [
                 'id' => (int)$forum['id'],
                 'name' => (string)$forum['name'],
                 'description' => (string)$forum['description'],
+                // 二级分类：parent_id>0 为子分类，parent_name 为所属一级版块
+                'parent_id' => $parent_id,
+                'parent_name' => $parent_id > 0 ? (string)(forum_by_id($parent_id)['name'] ?? '') : '',
                 'can_view' => forum_group_allowed($forum, 'allow_view_groups'),
                 'can_post' => forum_group_allowed($forum, 'allow_post_groups'),
                 'can_reply' => forum_group_allowed($forum, 'allow_reply_groups'),
@@ -255,6 +263,7 @@ final class Mcp
             'site_name' => setting('site_name', 'FORUM'),
             'site_url' => rtrim(base_url(), '/'),
             'account' => ['id' => (int)$me['id'], 'username' => (string)$me['username'], 'group' => (string)$me['group_name'], 'is_muted' => (int)$me['is_muted'] === 1],
+            // 版块为两级结构：一级为导航版块，parent_id>0 的是其二级分类；list_topics 传一级版块会聚合其全部子分类
             'forums' => $forums,
         ]);
     }
@@ -274,7 +283,8 @@ final class Mcp
         }
         $base = static function () use ($fid, $target_uid, $q) {
             $builder = Topic::query();
-            if ($fid > 0) $builder->where('forum_id', $fid);
+            // 与前端一致：传一级版块时聚合其全部可见子分类的主题
+            if ($fid > 0) $builder->whereIn('forum_id', array_merge([$fid], forum_child_ids($fid, true)));
             if ($target_uid > 0) $builder->where('user_id', $target_uid);
             if ($q !== '') {
                 [$condition, $params] = content_search_condition($q, 'title');
@@ -421,6 +431,38 @@ final class Mcp
         // 删除路径: 楼层索引记录 + 级联回帖 + 主题行, 全程事务
         del('topics', $tid, true);
         return self::json_text(['topic_id' => $tid, 'deleted_replies' => $deleted_replies, 'message' => '主题已删除']);
+    }
+
+    /**
+     * 批量删除：单次上限 500 篇防误操作。每篇走与 delete_topic 完全相同的校验和删除路径，
+     * 独立事务互不影响——某篇失败（不存在/无权限）不阻断其余；全部结果随响应返回。
+     */
+    private static function tool_delete_topics_batch(array $args): string
+    {
+        $ids = $args['topic_ids'] ?? null;
+        if (!is_array($ids)) throw new McpToolException('topic_ids 必须是主题 ID 数组');
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn($v): bool => $v > 0)));
+        if (!$ids) throw new McpToolException('topic_ids 为空');
+        if (count($ids) > 500) throw new McpToolException('单次最多删除 500 篇，请分批调用');
+        $deleted = [];
+        $failed = [];
+        foreach ($ids as $tid) {
+            try {
+                $t = Topic::find($tid)?->toArray() ?: throw new McpToolException('主题不存在');
+                if (!can_manage_topic($t)) throw new McpToolException('没有删除该主题的权限', 'denied');
+                del('topics', $tid, true);
+                $deleted[] = $tid;
+            } catch (McpToolException $e) {
+                $failed[] = ['topic_id' => $tid, 'error' => $e->getMessage()];
+            }
+        }
+        return self::json_text([
+            'requested' => count($ids),
+            'deleted_count' => count($deleted),
+            'deleted_ids' => $deleted,
+            'failed' => $failed,
+            'message' => count($failed) === 0 ? '批量删除完成，共删除 ' . count($deleted) . ' 篇' : '批量删除完成，成功 ' . count($deleted) . ' 篇，失败 ' . count($failed) . ' 篇',
+        ]);
     }
 
     private static function tool_my_info(ApiToken $token): string

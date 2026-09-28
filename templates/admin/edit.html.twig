@@ -13,8 +13,10 @@
                 {{ f.checkbox('允许后台管理', 'allow_admin', group.allow_admin|default(0) > 0) }}
             {% else %}
                 {{ f.input('名称', 'name', forum.name|default(''), 'text', true) }}
+                {{ f.select_input('上级版块', 'parent_id', forum.parent_id|default(0), parent_options, '选择上级后本版块成为其二级分类：导航不再直接显示，父版块页会聚合本分类主题') }}
                 {{ f.number_input('排序', 'sort', forum.sort|default(0)) }}
                 {{ f.textarea('描述', 'description', forum.description|default('')) }}
+                {{ f.checkbox('收费模式（打码联系方式）', 'paid_mode', forum.paid_mode|default(0) > 0, '开启后该版块帖子内的手机号、座机、邮箱、微信、QQ 等联系方式对非管理员显示为 ******') }}
                 {% for field, label in {allow_view_groups: '允许浏览用户组', allow_post_groups: '允许发帖用户组', allow_reply_groups: '允许回帖用户组'} %}
                     <div class="grid"><span>{{ label }}</span><div class="forum-group-checks">{% for g in groups %}<label class="check"><input type="checkbox" name="{{ field }}[]" value="{{ g.id }}"{{ g.id in forum_selected[field] ? ' checked' : '' }}><span>{{ g.name }}</span></label>{% endfor %}</div></div>
                 {% endfor %}

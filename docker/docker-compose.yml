@@ -34,6 +34,8 @@ x-php: &php
     TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
     TURNSTILE_SECRET: ${TURNSTILE_SECRET:-}
     TURNSTILE_HOSTNAMES: ${TURNSTILE_HOSTNAMES:-}
+    # SEO TDK 队列的 AI 生成密钥（OpenAI 兼容接口），真实值在 .env；留空时 AI 生成关闭，回落规则生成
+    DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
   volumes:
     - ${BBS1ORG_PATH:-..}:/var/www/html:rw
     - data:/var/www/html/app/data

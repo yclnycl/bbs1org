@@ -17,6 +17,7 @@ use app\optional\Model\TopicDeletion;
 use app\optional\Model\User;
 use app\optional\Model\ViewStat;
 use app\optional\Search;
+use app\optional\TopicTDK;
 if (!is_file(__DIR__ . '/vendor/autoload.php')) {
     header('Content-Type: text/plain; charset=utf-8');
     exit("缺少依赖：请先在项目根目录执行 composer install 后再运行本程序。\n");
@@ -210,6 +211,18 @@ function default_settings(): array
         'excerpt_length' => '200',
         'post_interval_seconds' => '5',
         'baidu_verification' => 'codeva-o0vee5lpeB',
+        // 详情页 TDK 队列生成：密钥走环境变量 DEEPSEEK_API_KEY，不在库与代码中存放
+        'tdk_enabled' => '1',
+        'tdk_ai_enabled' => '1',
+        'tdk_api_base' => 'https://api.deepseek.com',
+        'tdk_model' => 'deepseek-flash',
+        'tdk_batch_size' => '3',
+        'tdk_interval_seconds' => '300',
+        'tdk_timeout' => '30',
+        'tdk_title_max' => '45',
+        'tdk_description_min' => '100',
+        'tdk_description_max' => '160',
+        'tdk_keyword_max' => '8',
     ];
 }
 function settings_cache(): array
@@ -864,10 +877,70 @@ function default_site_description(): string
 {
     return '旧衣回收、出口行情与政策法规的行业资讯与交流社区。';
 }
+/** 收费模式：联系方式脱敏——手机号、座机/400、邮箱、微信号、QQ 号一律替换为 ****** */
+function mask_contacts(string $text): string
+{
+    // 邮箱先处理，避免本地部分被后续规则误伤
+    $text = preg_replace('/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/u', '******', $text) ?? $text;
+    // 带引导词的号码（含 +86 国际格式等变体）
+    $text = preg_replace('/(电话|手机|手机号|联系方式|致电|热线|tel)\s*[:：]?\s*\+?\d[\d\s-]{6,17}\d/iu', '$1：******', $text) ?? $text;
+    // 手机号：11 位连写与 3-4-4 分隔写法
+    $text = preg_replace('/(?<!\d)1[3-9]\d{9}(?!\d)/u', '******', $text) ?? $text;
+    $text = preg_replace('/(?<!\d)1[3-9]\d[- ]\d{4}[- ]\d{4}(?!\d)/u', '******', $text) ?? $text;
+    // 座机（区号-号码）与 400/800 热线
+    $text = preg_replace('/(?<!\d)(?:0\d{2,3}|[48]00)[- ]?\d{7,8}(?!\d)/u', '******', $text) ?? $text;
+    $text = preg_replace('/(?<!\d)[48]00[- ]\d{3}[- ]\d{4}(?!\d)/u', '******', $text) ?? $text;
+    // 微信号：前缀引导 + 6-20 位字母开头的 ID
+    $text = preg_replace('/(微信号?|weixin|wx|vx|v信)\s*[:：#]?\s*[a-zA-Z][a-zA-Z0-9_-]{5,19}/iu', '$1：******', $text) ?? $text;
+    // QQ 号
+    $text = preg_replace('/(扣扣|qq)\s*[:：#]?\s*\d{5,11}/iu', '$1：******', $text) ?? $text;
+    return $text;
+}
+function forum_paid_mode(int $forum_id): bool
+{
+    $forum = forum_by_id($forum_id);
+    return $forum !== null && (int)($forum['paid_mode'] ?? 0) === 1;
+}
+/** 收费模式版块的内容对非管理员脱敏：只动展示数据，原文与编辑回显不受影响 */
+function mask_topic_contacts(array $t): array
+{
+    if (can_manage() || !forum_paid_mode((int)$t['forum_id'])) return $t;
+    $t['title'] = mask_contacts((string)$t['title']);
+    $t['body'] = mask_contacts((string)$t['body']);
+    return $t;
+}
+/** 运行时结构补列：settings 打标，每个部署只执行一次（Bootstrap 只管全新安装的建表） */
+function ensure_schema_bumps(): void
+{
+    static $done = false;
+    if ($done || (int)setting('schema_bumps', '0') >= 2) return;
+    $done = true;
+    $db = db();
+    $cols = array_column($db->query('PRAGMA table_info(app_forums)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+    if (!in_array('paid_mode', $cols, true)) $db->exec('ALTER TABLE app_forums ADD COLUMN paid_mode INTEGER NOT NULL DEFAULT 0');
+    if (!in_array('parent_id', $cols, true)) $db->exec('ALTER TABLE app_forums ADD COLUMN parent_id INTEGER NOT NULL DEFAULT 0');
+    save_settings_values(['schema_bumps' => '2']);
+}
+/** 二级分类：子版块 ID 清单（版块层级固定两层） */
+function forum_child_ids(int $fid, bool $viewable_only = false): array
+{
+    $ids = [];
+    foreach (forums_cache() as $f) {
+        if ((int)($f['parent_id'] ?? 0) !== $fid) continue;
+        if ($viewable_only && !forum_group_allowed($f, 'allow_view_groups')) continue;
+        $ids[] = (int)$f['id'];
+    }
+    return $ids;
+}
 /** SEO：首页 <title> 的业务词后缀 */
 function home_title_suffix(): string
 {
     return '旧衣回收与出口行业资讯';
+}
+/** SEO：首页 <title> 的补充定位语——把标题拼到 Bing 建议的 50-60 字符区间，纯"站名 - 后缀"仅 21 字会被判过短 */
+function home_title_tagline(): string
+{
+    return '行情数据、政策法规与供应信息每日更新';
 }
 /** SEO：JSON-LD 输出编码——HEX_TAG 防止标题正文里的 `</script>` 提前闭合标签 */
 function seo_jsonld_script(array $objects): string
@@ -1026,7 +1099,10 @@ function pagination_data(bool $simple, int $total, int $page, int $size, string 
 function post_forum_options(): array
 {
     $options = [];
-    foreach (forums_cache() as $f) if (forum_group_allowed($f, 'allow_post_groups')) $options[(int)$f['id']] = (string)$f['name'];
+    foreach (forums_cache() as $f) {
+        if (!forum_group_allowed($f, 'allow_post_groups')) continue;
+        $options[(int)$f['id']] = ((int)($f['parent_id'] ?? 0) > 0 ? '└ ' : '') . (string)$f['name'];
+    }
     return $options;
 }
 /** 主题列表需要的列；列表不展示正文，所以不带 body */
@@ -1127,9 +1203,11 @@ function flash_json(string $flash): string
 }
 function page_nav_data(string $site_name): array
 {
+    // 导航只列一级版块；当前在子版块时高亮其父级
     $active_forum = ($_GET['a'] ?? '') === 'forum' ? id() : 0;
+    if ($active_forum && (int)(forum_by_id($active_forum)['parent_id'] ?? 0) > 0) $active_forum = (int)forum_by_id($active_forum)['parent_id'];
     $mine = me();
-    $forums = array_values(array_filter(forums_cache(), fn($f) => forum_group_allowed($f, 'allow_view_groups')));
+    $forums = array_values(array_filter(forums_cache(), fn($f) => (int)($f['parent_id'] ?? 0) === 0 && forum_group_allowed($f, 'allow_view_groups')));
     $visible_limit = min(20, max(0, (int)setting('pc_nav_forum_count', '6')));
     $visible = array_slice($forums, 0, $visible_limit);
     $visible_ids = array_map(fn($f): int => (int)$f['id'], $visible);
@@ -1158,10 +1236,19 @@ function page_common_data(string $title, array $seo = []): array
     $site_name = trim((string)$settings['site_name']) ?: 'FORUM';
     $site_name_title = trim((string)($settings['site_name_title'] ?? '')) ?: $site_name;
     $is_home = ($_GET['a'] ?? 'home') === 'home' && trim((string)($_GET['q'] ?? '')) === '';
+    // 版块页 title 拼版块描述：纯"版块名 - 站名"只有 14 字，低于 Bing 的过短阈值
+    $title_tagline = '';
+    if (($_GET['a'] ?? '') === 'forum') {
+        $forum = forum_by_id(id());
+        $title_tagline = $forum ? trim((string)$forum['description']) : '';
+    }
     $page_title = $is_home || $title === '' || $title === $site_name
-        ? trim($site_name_title . ($is_home && home_title_suffix() !== '' ? ' - ' . home_title_suffix() : ''))
-        : $title . ' - ' . $site_name_title;
+        ? trim($site_name_title . ($is_home && home_title_suffix() !== '' ? ' - ' . home_title_suffix() : '')
+            . ($is_home && home_title_tagline() !== '' ? '｜' . home_title_tagline() : ''))
+        : $title . ' - ' . $site_name_title . ($title_tagline !== '' ? '：' . $title_tagline : '');
     $description = trim((string)($seo['description'] ?? ($settings['site_description'] ?? '')));
+    // description 任何页面都不为空：后台清空站点/版块描述时退回默认一句话，head 缺 description meta 会被 Bing SEO 扫描记高危
+    if ($description === '') $description = default_site_description();
     $flash = trim((string)($_COOKIE['__flash'] ?? ''));
     if ($flash !== '' && !headers_sent()) app_cookie('__flash', '', time() - 3600, true, false);
     // 全站结构化数据：Organization 每页都有，WebSite（含搜索动作）走 @id 引用
@@ -1200,6 +1287,8 @@ function page_common_data(string $title, array $seo = []): array
         // og:image 兜底：页面无图时用全站默认横幅，保证社交/AI 预览卡片不为空
         'seo_image' => trim((string)($seo['image'] ?? '')) !== '' ? (string)$seo['image'] : absolute_url(asset_url('app/assets/og-default.png')) . '?v=' . APP_VERSION,
         'seo_jsonld' => seo_jsonld_script($jsonld),
+        'seo_noindex' => (bool)($seo['noindex'] ?? false),
+        'seo_keywords' => trim((string)($seo['keywords'] ?? '')),
         'is_home' => $is_home,
         'page_title' => $page_title,
         'flash' => $flash,
@@ -1303,15 +1392,55 @@ function absolute_url(string $url): string
 }
 function seo_text(string $text, ?int $max = null): string
 {
+    // ****** 是打码占位符，markdown 会把连续星号当强调语法吃掉：渲染前转义、渲染后还原为字面
+    $text = str_replace('******', '\*\*\*\*\*\*', $text);
     $text = html_entity_decode(strip_tags(markdown_html($text)), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $text = str_replace('\*', '*', $text);
     return cut(trim(preg_replace('/\s+/u', ' ', $text) ?? ''), $max ?? excerpt_length());
 }
-function page_seo(string $route, array $params = [], string $description = ''): array
+/** SEO：description 低于 Bing 建议下限（150 字符）时按序补充站点定位语凑足；结果页只展示前段，长描述无副作用 */
+function seo_pad_description(string $description, string $title = ''): string
+{
+    $description = trim($description);
+    if ($description === '' || mb_strlen($description) >= 150) return $description;
+    // 标题前置：SERP 只展示前 ~80 字，标题里的关键字要落在展示区
+    $title = trim($title);
+    if ($title !== '' && mb_strpos($description, $title) === false) $description = $title . '。' . $description;
+    $parts = [];
+    $parts[] = trim((string)(settings_cache()['site_description'] ?? '')) ?: default_site_description();
+    $parts[] = '本站面向旧衣回收、分拣、出口与再生利用从业者，提供行情数据、行业新闻与政策解读，支持供需信息发布与行业交流。';
+    // 版块清单只列一级版块，二级分类不进站点定位语
+    $forum_names = implode('、', array_map(static fn(array $f): string => (string)$f['name'], array_filter(sitemap_viewable_forums(), static fn(array $f): bool => (int)($f['parent_id'] ?? 0) === 0)));
+    if ($forum_names !== '') $parts[] = '覆盖' . $forum_names . '等版块，内容每日更新。';
+    $parts[] = '所有内容免费开放阅读，欢迎行业同仁交流分享。';
+    foreach ($parts as $p) {
+        if (mb_strlen($description) >= 150) break;
+        $p = trim($p);
+        if ($p === '' || mb_strpos($description, $p) !== false) continue;
+        $description = rtrim($description, "。．.！!？?；; \t\n\r") . '。' . $p;
+    }
+    return $description;
+}
+function page_seo(string $route, array $params = [], string $description = '', string $title = ''): array
 {
     $seo = ['canonical' => absolute_url(route_url($route, $params))];
-    $description = seo_text($description);
+    $description = seo_pad_description(seo_text($description), $title);
     if ($description !== '') $seo['description'] = $description;
     return $seo;
+}
+/** TDK 队列的流量触发：页面响应结束后限频跑一小批生成，不拖慢用户请求；CLI（smoke、命令行）不触发 */
+function tdk_cron_tick(): void
+{
+    if (PHP_SAPI === 'cli' || !TopicTDK::enabled()) return;
+    $interval = max(60, (int)setting('tdk_interval_seconds', '300'));
+    if (now() - (int)setting('tdk_last_run', '0') < $interval) return;
+    save_settings_values(['tdk_last_run' => (string)now()]);
+    if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+    try {
+        TopicTDK::process_batch();
+    } catch (Throwable $e) {
+        debug_log_write('TDK 队列批处理失败', $e);
+    }
 }
 function content_create_author(string $hook_name, array $content, array $context, array $limits): array
 {
@@ -1709,7 +1838,8 @@ function topic_index_data(int $fid, ?array $user, string $profile_tab, string $q
     // 主题列表的基础条件：版块过滤 + 标题/正文搜索；个人页再叠加 user_id
     $topic_list_query = static function () use ($fid, $query, $search_field) {
         $builder = Topic::query();
-        if ($fid) $builder->where('forum_id', $fid);
+        // 二级分类：父版块列表聚合其可见子版块的主题，子版块自身只列自己
+        if ($fid) $builder->whereIn('forum_id', array_merge([$fid], forum_child_ids($fid, true)));
         if ($query !== '' && $search_field !== 'reply') {
             [$condition, $params] = content_search_condition($query, $search_field);
             $builder->whereRaw('(' . $condition . ')', $params);
@@ -1815,12 +1945,48 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
     $title = $profile_uid ? $filter_user['username'] : ($filter_forum ? $filter_forum['name'] : '首页');
     $brand = trim((string)(settings_cache()['site_name_title'] ?? '')) ?: trim((string)(settings_cache()['site_name'] ?? '')) ?: 'FORUM';
     $page_h1 = $filter_forum ? (string)$filter_forum['name'] : ($profile_uid ? '' : $brand);
+    // 可见 h1 的副行：版块页放版块描述、首页放站点一句话（与 description meta 同源），资料页没有 h1 也就不要副行
+    $page_h1_sub = $profile_uid ? ''
+        : ($filter_forum ? trim((string)$filter_forum['description'])
+        : (trim((string)(settings_cache()['site_description'] ?? '')) ?: default_site_description()));
+    // 二级分类 tab：父版块显示「全部分类 + 各子分类」，子版块显示「父级(聚合) + 同级各分类」
+    $category_tabs = [];
+    $category_active = '';
+    if ($filter_forum && !$q) {
+        $parent_id = (int)($filter_forum['parent_id'] ?? 0);
+        if ($parent_id > 0) {
+            $parent = forum_by_id($parent_id);
+            if ($parent && forum_group_allowed($parent, 'allow_view_groups')) {
+                $category_tabs['all'] = ['label' => (string)$parent['name'], 'href' => route_url('forum', ['id' => $parent_id])];
+                foreach (forums_cache() as $sf) {
+                    if ((int)($sf['parent_id'] ?? 0) !== $parent_id || !forum_group_allowed($sf, 'allow_view_groups')) continue;
+                    $key = 'f' . (int)$sf['id'];
+                    $category_tabs[$key] = ['label' => (string)$sf['name'], 'href' => route_url('forum', ['id' => (int)$sf['id']])];
+                    if ((int)$sf['id'] === $fid) $category_active = $key;
+                }
+            }
+        } else {
+            if (forum_child_ids($fid, true) !== []) {
+                $category_tabs['all'] = ['label' => '全部分类', 'href' => route_url('forum', ['id' => $fid])];
+                foreach (forums_cache() as $sf) {
+                    if ((int)($sf['parent_id'] ?? 0) !== $fid || !forum_group_allowed($sf, 'allow_view_groups')) continue;
+                    $category_tabs['f' . (int)$sf['id']] = ['label' => (string)$sf['name'], 'href' => route_url('forum', ['id' => (int)$sf['id']])];
+                }
+                $category_active = 'all';
+            }
+        }
+    }
     $seo = [];
     if ($profile_uid) {
         $seo = page_seo('user', ['id' => $profile_uid], (string)($filter_user['bio'] ?? $filter_user['username']));
+        // 空资料页（无主题、无回帖、无简介）不参与索引：对搜索引擎属薄内容负资产
+        $seo['noindex'] = trim((string)($filter_user['bio'] ?? '')) === ''
+            && !Topic::where('user_id', $profile_uid)->exists()
+            && !Reply::where('user_id', $profile_uid)->exists();
     } elseif ($filter_forum) {
-        $seo = page_seo('forum', ['id' => $fid], (string)($filter_forum['description'] ?? ''));
-        if (($seo['description'] ?? '') === '') $seo['description'] = '「' . $filter_forum['name'] . '」版块的最新主题与讨论——' . $brand;
+        $seo = page_seo('forum', ['id' => $fid], trim((string)$filter_forum['description']) !== ''
+            ? (string)$filter_forum['description']
+            : '「' . $filter_forum['name'] . '」版块的最新主题与讨论——' . $brand);
         $forum_url = absolute_url(route_url('forum', ['id' => $fid]));
         $seo['jsonld'] = [
             [
@@ -1850,6 +2016,8 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
     foreach (($data['rows'] ?? []) as $t) {
         $t['time'] = (int)($t['list_time'] ?? $t['my_reply_at'] ?? ($sort === 'post' ? $t['created_at'] : ($t['last_reply_at'] ?: $t['created_at'])));
         $t['forum'] = forum_by_id((int)$t['forum_id']) ?: ['id' => 0, 'name' => ''];
+        // 收费模式版块：列表标题同样打码
+        if (!can_manage() && (int)($t['forum']['paid_mode'] ?? 0) === 1) $t['title'] = mask_contacts((string)$t['title']);
         $list_rows[] = $t;
     }
     $notification_rows = [];
@@ -1870,13 +2038,16 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
         'q' => $q,
         'fid' => $fid,
         'sort' => $sort,
-        'mobile_forums' => $q === '' ? array_values(array_filter(forums_cache(), fn($f) => forum_group_allowed($f, 'allow_view_groups'))) : [],
+        'mobile_forums' => $q === '' ? array_values(array_filter(forums_cache(), fn($f) => (int)($f['parent_id'] ?? 0) === 0 && forum_group_allowed($f, 'allow_view_groups'))) : [],
         'tab_items' => $tab_items,
         'rows' => $data['rows'],
         'list_rows' => $list_rows,
         'notification_rows' => $notification_rows,
         'empty_text' => $empty_text,
         'page_h1' => $page_h1,
+        'page_h1_sub' => $page_h1_sub,
+        'category_tabs' => $category_tabs,
+        'category_active' => $category_active,
         'pagination' => $pagination,
         'sidebar_user' => $profile_uid ? $filter_user : null,
         'shell_class' => $profile_uid ? 'profile-mobile-sidebar' . ($own_profile ? ' profile-mobile-sidebar-own' : '') : ($is_home_first_page ? 'home-mobile-sidebar' : ''),
@@ -1901,6 +2072,11 @@ function topic_page_replies(array $topic, int $page, int $size, int $offset, boo
         ? $reply_query->orderByDesc('created_at')->orderByDesc('id')
         : $reply_query->orderBy('created_at')->orderBy('id');
     $replies = $reply_query->limit($size)->offset($offset)->get()->map->toArray()->all();
+    // 收费模式版块的回帖同样脱敏（原文不动）
+    if (forum_paid_mode((int)$topic['forum_id']) && !can_manage()) {
+        foreach ($replies as &$r) $r['body'] = mask_contacts((string)$r['body']);
+        unset($r);
+    }
     $posts = attach_users(array_merge([$topic], $replies));
     $topic = array_shift($posts);
     $replies = $posts;
@@ -1910,6 +2086,10 @@ function topic_page_replies(array $topic, int $page, int $size, int $offset, boo
 function topic_page_view(array $view): array
 {
     extract($view, EXTR_SKIP);
+    // 打码占位符 ****** 经 markdown 渲染会被当强调语法吃掉：渲染前转义，页面显示字面星号
+    $t['body'] = str_replace('******', '\*\*\*\*\*\*', (string)$t['body']);
+    foreach ($replies as &$r) $r['body'] = str_replace('******', '\*\*\*\*\*\*', (string)$r['body']);
+    unset($r);
     $reply_rows = [];
     foreach ($replies as $i => $r) {
         if (trim((string)$r['body']) === '') continue;
@@ -1940,6 +2120,8 @@ function topic_page(): void
     $t = Topic::find(id())?->toArray() ?: err('你访问的帖子可能已经删除', 404);
     $forum = forum_by_id((int)$t['forum_id']);
     if ($forum && !forum_group_allowed($forum, 'allow_view_groups')) err('无权限');
+    // 收费模式版块：非管理员看到的内容先脱敏，标题/正文/摘要/TDK 全部走打码后的数据
+    $t = mask_topic_contacts($t);
     if (mark_viewed((int)$t['id'])) {
         Topic::whereKey($t['id'])->increment('view_count');
         record_view_stat();
@@ -1973,7 +2155,18 @@ function topic_page(): void
     $t = $page_data['topic'];
     $replies = apply_reply_floors($page_data['replies'], $t, $p, $size, $reply_desc);
     $view = compact('t', 'forum', 'replies', 'p', 'size', 'off', 'reply_desc', 'replyid', 'floor') + ['topic' => $t, 'page' => $p, 'page_size' => $size, 'offset' => $off, 'reply_order' => $reply_desc ? 1 : 0];
-    $t_seo = page_seo('topic', ['id' => (int)$t['id']], (string)$t['body']);
+    $t_seo = page_seo('topic', ['id' => (int)$t['id']], (string)$t['body'], (string)$t['title']);
+    // TDK 队列生成结果优先：title/description 换成生成值（描述仍过补足规则保证不低于 Bing 下限），keywords 进 meta 与 JSON-LD
+    $t_tdk = TopicTDK::meta_for((int)$t['id']);
+    if ($t_tdk) {
+        // 存量 TDK 生成于打码功能之前，收费版块（非管理员）应用时统一再脱敏一次
+        if (forum_paid_mode((int)$t['forum_id']) && !can_manage()) {
+            $t_tdk = array_map(static fn($v) => is_string($v) ? mask_contacts($v) : $v, $t_tdk);
+        }
+        if (trim((string)$t_tdk['title']) !== '') $t_tdk_title = cut(trim((string)$t_tdk['title']), (int)setting('tdk_title_max', '45'));
+        if (trim((string)$t_tdk['description']) !== '') $t_seo['description'] = seo_pad_description(seo_text((string)$t_tdk['description']));
+        if (trim((string)$t_tdk['keywords']) !== '') $t_seo['keywords'] = trim((string)$t_tdk['keywords']);
+    }
     $t_base = rtrim(base_url(), '/');
     $topic_url = $t_seo['canonical'];
     // og:image 取正文第一张非 SVG 图片；SVG 不是社交平台支持的预览格式
@@ -2001,7 +2194,7 @@ function topic_page(): void
                 ['@type' => 'InteractionCounter', 'interactionType' => 'https://schema.org/CommentAction', 'userInteractionCount' => (int)$t['reply_count']],
             ],
             'publisher' => ['@id' => $t_base . '/#organization'],
-        ],
+        ] + (isset($t_seo['keywords']) ? ['keywords' => array_map('trim', explode(',', (string)$t_seo['keywords']))] : []),
         [
             '@context' => 'https://schema.org',
             '@type' => 'BreadcrumbList',
@@ -2014,9 +2207,10 @@ function topic_page(): void
     ];
     $t_seo['og_type'] = 'article';
     if ($t_image !== '') $t_seo['image'] = $t_image;
-    // <title> 里的标题截断到 32 字，保证「标题 - 版块 - 站名」整体在搜索结果展示宽度内
-    $t_title_seo = (string)$t['title'];
-    if (mb_strlen($t_title_seo) > 32) $t_title_seo = cut($t_title_seo, 32) . '…';
+    // <title> 标题段截断：默认规则截 32 字保「标题 - 版块 - 站名」整体宽度；TDK 生成的标题已按 tdk_title_max 控长，放宽到 45 字
+    $t_title_seo = isset($t_tdk_title) ? $t_tdk_title : (string)$t['title'];
+    $t_title_cap = isset($t_tdk_title) ? (int)setting('tdk_title_max', '45') : 32;
+    if (mb_strlen($t_title_seo) > $t_title_cap) $t_title_seo = cut($t_title_seo, $t_title_cap) . '…';
     render_page('topic.html.twig', topic_page_view($view), $t_title_seo . ' - ' . $forum['name'], $t_seo);
 }
 function topic_edit_page(): void
@@ -2102,7 +2296,7 @@ function reply_edit_page(): void
 function admin_tabs(): array
 {
     $items = [];
-    foreach (['settings' => '设置', 'verify' => '站点验证', 'forums' => '版块', 'groups' => '用户组', 'topics' => '帖子管理', 'users' => '用户管理', 'report' => '数据报表', 'mcp' => 'MCP日志'] as $key => $label) {
+    foreach (['settings' => '设置', 'verify' => '站点验证', 'tdk' => 'SEO TDK', 'forums' => '版块', 'groups' => '用户组', 'topics' => '帖子管理', 'users' => '用户管理', 'report' => '数据报表', 'mcp' => 'MCP日志'] as $key => $label) {
         $items[$key] = ['label' => $label, 'href' => admin_url(['tab' => $key])];
     }
     return $items;
@@ -2335,6 +2529,7 @@ parse_path_route();
 // 先接上 Eloquent 再初始化，Bootstrap 里的建表和造数都走它
 Database::boot();
 if (!db_schema_ready()) Bootstrap::run();
+ensure_schema_bumps();
 check();
 need_site_access();
 // canonical_host_redirect() 停用：apex 与 www 都要能直接访问，不再 301 到规范域；canonical 等绝对地址仍由 site_base_url 生成
@@ -2361,3 +2556,5 @@ try {
     }
     err($message);
 }
+// 响应已交付：流量触发的 TDK 队列批处理（限频 + 租约互斥，见 tdk_cron_tick / TopicTDK::process_batch）
+tdk_cron_tick();

@@ -212,6 +212,7 @@ function default_settings(): array
         'excerpt_length' => '200',
         'post_interval_seconds' => '5',
         'baidu_verification' => 'codeva-o0vee5lpeB',
+        'baidu_tongji_url' => '',
         // 详情页 TDK 队列生成：密钥走环境变量 DEEPSEEK_API_KEY，不在库与代码中存放
         'tdk_enabled' => '1',
         'tdk_ai_enabled' => '1',
@@ -1203,6 +1204,8 @@ function twig(bool $cache = true): Twig\Environment
     // 正文是富文本渲染（Markdown 子集 + 提及/楼层链接），属于文本转换而非页面结构，保留为过滤器
     $env->addFilter(new Twig\TwigFilter('markdown', markdown_html(...), ['is_safe' => ['html']]));
     $env->addFilter(new Twig\TwigFilter('notification_content', notification_content_html(...), ['is_safe' => ['html']]));
+    // 统计脚本地址进 JS 字符串：整段 |e('js') 会把 URL 打成 \x3A 不可读，这里只转义真正危险的字符
+    $env->addFilter(new Twig\TwigFilter('js_string', js_string_escape(...)));
     $env->addGlobal('app_version', APP_VERSION);
     return $envs[$cache] = $env;
 }
@@ -1214,6 +1217,11 @@ function template(string $name, array $data = []): string
 function template_uncached(string $name, array $data = []): string
 {
     return twig(false)->render($name, $data);
+}
+/** 进 JS 字符串的值（统计脚本地址等）：只转义能跳出字符串/闭合 script 的字符，URL 保持原样可读 */
+function js_string_escape(string $value): string
+{
+    return str_replace(['\\', '"', '<', '>'], ['\\\\', '\\"', '\\x3C', '\\x3E'], $value);
 }
 function flash_json(string $flash): string
 {
@@ -2325,7 +2333,7 @@ function reply_edit_page(): void
 function admin_tabs(): array
 {
     $items = [];
-    foreach (['settings' => '设置', 'verify' => '站点验证', 'tdk' => 'SEO TDK', 'forums' => '版块', 'groups' => '用户组', 'topics' => '帖子管理', 'users' => '用户管理', 'report' => '数据报表', 'mcp' => 'MCP日志'] as $key => $label) {
+    foreach (['settings' => '设置', 'verify' => '站点验证', 'analytics' => '统计', 'tdk' => 'SEO TDK', 'forums' => '版块', 'groups' => '用户组', 'topics' => '帖子管理', 'users' => '用户管理', 'report' => '数据报表', 'mcp' => 'MCP日志'] as $key => $label) {
         $items[$key] = ['label' => $label, 'href' => admin_url(['tab' => $key])];
     }
     return $items;

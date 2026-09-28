@@ -51,6 +51,18 @@
     <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 16V4M4.5 9.5 10 4l5.5 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
 </button>
 <script>window.__pageFlash={{ flash_json(flash) }};</script>
+{# 百度统计：后台「统计」tab 配置 hm.js 脚本地址后全站插入；放在已有 script 之后，保证代码里 getElementsByTagName("script")[0] 能取到节点 #}
+{% if setting('baidu_tongji_url') != '' %}
+<script>
+var _hmt = _hmt || [];
+(function() {
+  var hm = document.createElement("script");
+  hm.src = "{{ setting('baidu_tongji_url')|js_string }}";
+  var s = document.getElementsByTagName("script")[0];
+  s.parentNode.insertBefore(hm, s);
+})();
+</script>
+{% endif %}
 {% block scripts %}{% endblock %}
 <script src="{{ app_url('app/assets/index.js') }}?v={{ app_version }}" defer></script>
 </body>

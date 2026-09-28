@@ -173,6 +173,33 @@ final class Admin
         go(admin_url(['tab' => 'verify']));
     }
 
+    /** 统计 tab：第三方统计脚本地址，非空即由公共模板 layout.html.twig 全站渲染 */
+    public static function analytics_fields(): array
+    {
+        return [
+            'baidu_tongji_url' => ['label' => '百度统计脚本地址', 'type' => 'url', 'help' => '百度统计（tongji.baidu.com）代码里 hm.js 开头的完整脚本地址，如 https://hm.baidu.com/hm.js?xxxxxxxx；保存后全站页面自动插入统计代码，留空则不加载。'],
+        ];
+    }
+
+    public static function analytics_view(): array
+    {
+        return ['fields' => self::analytics_fields(), 'settings' => settings_cache()];
+    }
+
+    public static function analytics_handle_post(): never
+    {
+        $values = [];
+        foreach (array_keys(self::analytics_fields()) as $key) {
+            $value = trim(post($key, DB_STRING_MAX_LENGTH));
+            // 地址会原样进全站 <script>，禁掉空格与引号/尖括号/反斜杠，杜绝借配置注入脚本
+            if ($value !== '' && (!filter_var($value, FILTER_VALIDATE_URL) || preg_match('/[\s<>"\'\\\\]/', $value))) err('统计地址必须是以 http(s):// 开头的完整链接，且不含空格或引号');
+            $values[$key] = $value;
+        }
+        save_settings_values($values);
+        set_flash('统计配置已保存');
+        go(admin_url(['tab' => 'analytics']));
+    }
+
     /** SEO TDK tab 的字段白名单：数值字段统一 [下限, 上限] 校验 */
     private static function tdk_number_fields(): array
     {
@@ -244,19 +271,20 @@ final class Admin
         if ($tab === 'settings' && (string)($_GET['debug_log'] ?? '') === 'view') { header('Content-Type: text/plain; charset=utf-8'); echo is_file(DEBUG_LOG_FILE) ? (string)file_get_contents(DEBUG_LOG_FILE) : ''; exit; }
         if ($tab === 'settings' && is_post_request()) self::settings_handle_post();
         if ($tab === 'verify' && is_post_request()) self::verify_handle_post();
+        if ($tab === 'analytics' && is_post_request()) self::analytics_handle_post();
         if ($tab === 'tdk' && is_post_request()) self::tdk_handle_post();
         if ($tab === 'topics' && is_post_request()) self::topics_handle_post();
         if ($tab === 'users' && is_post_request()) self::users_handle_post();
         if ($tab === 'mcp' && is_post_request()) self::mcp_handle_post();
         $template = match ($tab) {
-            'settings' => 'admin/settings.html.twig', 'verify' => 'admin/verify.html.twig', 'groups' => 'admin/groups.html.twig', 'forums' => 'admin/forums.html.twig',
+            'settings' => 'admin/settings.html.twig', 'verify' => 'admin/verify.html.twig', 'analytics' => 'admin/analytics.html.twig', 'groups' => 'admin/groups.html.twig', 'forums' => 'admin/forums.html.twig',
             'topics' => 'admin/topics.html.twig', 'users' => 'admin/users.html.twig', 'report' => 'admin/report.html.twig',
             'mcp' => 'admin/mcp.html.twig', 'tdk' => 'admin/tdk.html.twig',
             default => '',
         };
         if ($template === '') err('你访问的页面不存在', 404);
         $view = match ($tab) {
-            'settings' => self::settings_html(), 'verify' => self::verify_view(), 'groups' => self::groups_view(), 'forums' => self::forums_view(),
+            'settings' => self::settings_html(), 'verify' => self::verify_view(), 'analytics' => self::analytics_view(), 'groups' => self::groups_view(), 'forums' => self::forums_view(),
             'topics' => self::topics_view(), 'users' => self::users_view(), 'report' => self::report_view(),
             'mcp' => self::mcp_view(), 'tdk' => self::tdk_view(),
             default => [],

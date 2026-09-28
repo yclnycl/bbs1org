@@ -10,13 +10,20 @@ if (!defined('APP_ROOT')) exit;
 
 final class Search
 {
-    /** 搜索结果页：标题/正文/回帖聚合查询，命中上下文展开并标红（SearchIndex 驱动） */
+    /**
+     * 搜索结果页：标题/正文/回帖聚合查询，命中上下文展开并标红（SearchIndex 驱动）。
+     * GET 与 POST 都接受：GET 让分页变成普通链接，移动端无限滚动才能翻页，
+     * 也与 SearchAction 声明的 /search?q= 语义一致；写操作性质的限频只在第 1 页生效。
+     */
     public static function page(): void
     {
         if (!uid()) err('请登录后操作');
-        $submitted = is_post_request();
-        $query = $submitted ? post('q', length_limit('search', 'max')) : '';
-        $page = $submitted ? min(max_pagination_pages(), max(1, (int)($_POST['p'] ?? 1))) : 1;
+        $submitted = is_post_request() || array_key_exists('q', $_GET);
+        $max = length_limit('search', 'max');
+        $query = $submitted
+            ? (is_post_request() ? post('q', $max) : mb_substr(trim((string)($_GET['q'] ?? '')), 0, $max, 'UTF-8'))
+            : '';
+        $page = $submitted ? min(max_pagination_pages(), max(1, (int)($_POST['p'] ?? $_GET['p'] ?? 1))) : 1;
         if ($query !== '') require_search_min_chars($query);
         $results = [];
         $has_prev = false;

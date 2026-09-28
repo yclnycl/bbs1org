@@ -648,10 +648,11 @@ if (backToTop) {
 const initInfiniteScroll = () => {
     const list = document.querySelector(".main-panel .post-list");
     let bar = document.querySelector(".pagination-bar");
-    // 搜索结果的「下一页」是 POST 表单按钮，翻页里没有下一页链接时（如搜索页）自然不启用
+    // 没有分页条或没有下一页链接（如已到末页）时自然不启用
     if (!bar || !list || !window.matchMedia("(max-width: 720px)").matches || !("IntersectionObserver" in window)) return;
     const nextHref = () => {
-        const link = Array.from(bar.querySelectorAll("a")).find(a => a.textContent.trim() === "下一页");
+        // 下一页链接带 pagination-next 类：中文/英文文案都能定位，搜索页翻页也是普通链接
+        const link = bar.querySelector("a.pagination-next");
         return link ? link.getAttribute("href") : null;
     };
     if (!nextHref()) return;

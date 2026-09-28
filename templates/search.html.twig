@@ -6,8 +6,7 @@
         <div class="forum-main"><div class="main-panel">
             <div class="search-page-head">
                 <h2>{{ '聚合搜索'|t }}</h2>
-                <form class="search-page-form" method="post" action="{{ route_url('search') }}" data-no-ajax="1">
-                    {{ f.token() }}
+                <form class="search-page-form" method="get" action="{{ route_url('search') }}" data-no-ajax="1">
                     <div class="search-page-query">
                         <input type="search" name="q" value="{{ query }}" placeholder="{{ '同时搜索标题、内容与回帖'|t }}"{{ f.length_attrs('q')|raw }} required autofocus>
                         <button type="submit">{{ '搜索'|t }}</button>

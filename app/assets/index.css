@@ -3312,6 +3312,13 @@ mark.search-hit{
     font-weight: 600
 }
 
+/* 手机端搜索结果用无限滚动，分页条隐藏（翻页链接仍在 DOM 里供加载器取地址） */
+@media(max-width: 720px){
+    .search-page .pagination-bar{
+        display: none
+    }
+}
+
 /* 认证页页签 */
 .auth-tabs{
     display: flex;

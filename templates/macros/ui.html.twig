@@ -157,7 +157,7 @@
 {%- if end < pages - 1 %}{% set h = h ~ '<li><span class="ellipsis">...</span></li>' %}{% endif -%}
 {%- set h = h ~ '<li><a href="' ~ append_url_query(url, {p: pages})|e ~ '">' ~ pages ~ '</a></li>' -%}
 {%- endif -%}
-{%- if page < pages %}{% set h = h ~ '<li><a href="' ~ append_url_query(url, {p: page + 1})|e ~ '">' ~ '下一页'|t ~ '</a></li>' %}{% endif -%}
+{%- if page < pages %}{% set h = h ~ '<li><a class="pagination-next" href="' ~ append_url_query(url, {p: page + 1})|e ~ '">' ~ '下一页'|t ~ '</a></li>' %}{% endif -%}
 {%- set h = h ~ '<li class="pagination-jump"><form method="get" action="' ~ (url|split('?', 2))[0]|e ~ '">' ~ jump_hidden|raw ~ '<span class="pagination-jump-text">' ~ '跳至'|t ~ '</span><input class="pagination-jump-input" type="number" name="p" min="1" max="' ~ pages ~ '" value="' ~ page ~ '" aria-label="' ~ '页码'|t ~ '"><span class="pagination-jump-text">' ~ '页'|t ~ '</span><button type="submit">' ~ '跳转'|t ~ '</button></form></li>' -%}
 {{- (h ~ '</ul></div>')|raw -}}
 {%- endif -%}
@@ -170,7 +170,7 @@
 {%- set h = '<div class="pagination"><ul>' -%}
 {%- if has_prev %}{% set h = h ~ '<li><a href="' ~ append_url_query(url, {p: max(1, page - 1)})|e ~ '">' ~ '上一页'|t ~ '</a></li>' %}{% endif -%}
 {%- set h = h ~ '<li class="active"><a href="' ~ append_url_query(url, {p: page})|e ~ '">' ~ page ~ '</a></li>' -%}
-{%- if next %}{% set h = h ~ '<li><a href="' ~ append_url_query(url, {p: page + 1})|e ~ '">' ~ '下一页'|t ~ '</a></li>' %}{% endif -%}
+{%- if next %}{% set h = h ~ '<li><a class="pagination-next" href="' ~ append_url_query(url, {p: page + 1})|e ~ '">' ~ '下一页'|t ~ '</a></li>' %}{% endif -%}
 {{- (h ~ '</ul></div>')|raw -}}
 {%- endif -%}
 {% endmacro %}
@@ -219,7 +219,7 @@
 {% endmacro %}
 
 {% macro search_page_button(target, label, query) %}
-<form method="post" action="{{ route_url('search') }}" data-no-ajax="1"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ query }}"><input type="hidden" name="p" value="{{ target }}"><button type="submit">{{ label }}</button></form>
+<a class="pagination-link{{ label == '下一页' ? ' pagination-next' : '' }}" href="{{ route_url('search', {q: query, p: target}) }}" data-no-ajax="1">{{ label|t }}</a>
 {%- endmacro %}
 
 {% macro search_pagination(has_prev, has_next, page, query) %}

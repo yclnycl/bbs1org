@@ -33,7 +33,7 @@
     <link rel="stylesheet" href="{{ app_url('app/assets/index.css') }}?v={{ app_version }}">
     {% block head %}{% endblock %}
 </head>
-<body>
+<body data-contact-qr="{{ asset_url('app/assets/contact-qr.png') }}?v={{ app_version }}">
 <a class="skip-link" href="#main">跳到主要内容</a>
 {% include 'nav.html.twig' with {nav: nav} only %}
 <main class="wrap" id="main">

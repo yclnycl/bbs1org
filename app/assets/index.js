@@ -703,3 +703,53 @@ const initInfiniteScroll = () => {
 };
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initInfiniteScroll);
 else initInfiniteScroll();
+
+// 被打码的联系方式(******)改为可点击:弹窗引导微信扫码或长按识别添加好友
+const contactQrUrl = document.body instanceof HTMLElement ? document.body.dataset.contactQr || "" : "";
+const openContactQrModal = () => {
+    openModal("添加微信", '<img class="contact-qr" src="' + contactQrUrl + '" alt="微信二维码">'
+        + '<p class="contact-qr-hint">联系方式已隐藏。打开微信「扫一扫」扫描二维码，或在手机上长按识别二维码添加好友。</p>');
+};
+const wrapMaskedContacts = root => {
+    if (!contactQrUrl || !root) return;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        // 已经包装过的占位按钮里的文本不再二次包装，避免 MutationObserver 与包装互相触发
+        acceptNode: node => node.parentElement && node.parentElement.closest(".contact-masked")
+            ? NodeFilter.FILTER_REJECT
+            : (node.nodeValue.includes("******") ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP)
+    });
+    const targets = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) targets.push(node);
+    targets.forEach(node => {
+        const frag = document.createDocumentFragment();
+        node.nodeValue.split("******").forEach((part, index, parts) => {
+            if (part !== "") frag.append(part);
+            if (index < parts.length - 1) {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = "contact-masked";
+                button.title = "联系方式已隐藏，点击查看添加方式";
+                button.setAttribute("aria-label", "联系方式已隐藏，点击查看添加方式");
+                button.innerHTML = '******<span class="contact-masked-go">点击查看</span>';
+                frag.append(button);
+            }
+        });
+        node.replaceWith(frag);
+    });
+};
+if (contactQrUrl) {
+    wrapMaskedContacts(document.getElementById("main"));
+    // 无限滚动等动态插入的列表行同样要包装
+    const contactMain = document.getElementById("main");
+    if (contactMain) {
+        const contactObserver = new MutationObserver(mutations => {
+            mutations.forEach(mutation => mutation.addedNodes.forEach(node => {
+                if (node.nodeType === Node.ELEMENT_NODE) wrapMaskedContacts(node);
+            }));
+        });
+        contactObserver.observe(contactMain, {childList: true, subtree: true});
+    }
+    document.addEventListener("click", e => {
+        if (e.target.closest(".contact-masked")) openContactQrModal();
+    });
+}

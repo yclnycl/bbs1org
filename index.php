@@ -2529,9 +2529,62 @@ function llms_txt_route(): void
     $lines[] = '- 主题页 URL 形如 ' . absolute_url(route_url('topic', ['id' => 1])) . '（替换数字 id）';
     $lines[] = '- 行情类主题包含当日价格数据（元/kg），引用时请注明发布日期';
     $lines[] = '- 全站内容为服务端渲染，无需执行 JavaScript 即可读取';
+    $lines[] = '- 最新内容订阅源（RSS 2.0）：' . absolute_url(app_url('feed.xml'));
     header('Content-Type: text/plain; charset=UTF-8');
     header('Cache-Control: public, max-age=3600');
     echo implode("\n", $lines) . "\n";
+    exit;
+}
+/** /feed.xml：RSS 2.0 订阅源，取游客可见版块最新 30 篇主题（订阅器与聚合端发现更新的常规通道） */
+function feed_route(): void
+{
+    $settings = settings_cache();
+    $site_name = trim((string)$settings['site_name']) ?: 'FORUM';
+    $site_desc = trim((string)($settings['site_description'] ?? '')) ?: default_site_description();
+    $viewable = sitemap_viewable_forums();
+    $forum_ids = array_map(static fn(array $f): int => (int)$f['id'], $viewable);
+    $forum_names = array_column($viewable, 'name', 'id');
+    $items = '';
+    $last_build = 0;
+    if ($forum_ids) {
+        $rows = Topic::whereIn('forum_id', $forum_ids)->orderByDesc('created_at')->orderByDesc('id')
+            ->limit(30)->get(['id', 'title', 'body', 'created_at', 'forum_id']);
+        foreach ($rows as $t) {
+            $fid = (int)$t->forum_id;
+            $title = (string)$t->title;
+            $excerpt = seo_text((string)$t->body, 200);
+            // 收费版块与前台列表同口径：公开出口的标题与摘要一律打码
+            if (forum_paid_mode($fid)) {
+                $title = mask_contacts($title);
+                $excerpt = mask_contacts($excerpt);
+            }
+            $url = absolute_url(route_url('topic', ['id' => (int)$t->id]));
+            $pub = (int)$t->created_at;
+            $last_build = max($last_build, $pub);
+            $items .= "    <item>\n"
+                . '      <title>' . h($title) . "</title>\n"
+                . '      <link>' . h($url) . "</link>\n"
+                . '      <guid isPermaLink="true">' . h($url) . "</guid>\n"
+                . '      <pubDate>' . gmdate('r', $pub) . "</pubDate>\n"
+                . '      <category>' . h((string)($forum_names[$fid] ?? '')) . "</category>\n"
+                . '      <description>' . h($excerpt) . "</description>\n"
+                . "    </item>\n";
+        }
+    }
+    $xml = '<?xml version="1.0" encoding="UTF-8"?>' . "\n"
+        . '<rss version="2.0">' . "\n"
+        . "  <channel>\n"
+        . '    <title>' . h($site_name) . "</title>\n"
+        . '    <link>' . h(absolute_url(app_url())) . "</link>\n"
+        . '    <description>' . h($site_desc) . "</description>\n"
+        . "    <language>zh-cn</language>\n"
+        . ($last_build > 0 ? '    <lastBuildDate>' . gmdate('r', $last_build) . "</lastBuildDate>\n" : '')
+        . rtrim($items, "\n") . "\n"
+        . "  </channel>\n"
+        . "</rss>\n";
+    header('Content-Type: application/rss+xml; charset=UTF-8');
+    header('Cache-Control: public, max-age=600');
+    echo $xml;
     exit;
 }
 function core_routes(): array
@@ -2543,6 +2596,7 @@ function core_routes(): array
         'sitemap-pages.xml' => 'sitemap_pages_route',
         'robots.txt' => 'robots_txt_route',
         'llms.txt' => 'llms_txt_route',
+        'feed.xml' => 'feed_route',
         'seo-indexnow-key.txt' => 'indexnow_key_route',
         'mobile_menu' => 'mobile_menu_route',
         'preview' => 'preview_route',

@@ -29,6 +29,7 @@
     {% if seo_image != '' %}<meta name="twitter:image" content="{{ seo_image }}">{% endif %}
     {{ seo_jsonld|raw }}
     <link rel="icon" type="image/svg+xml" href="{{ asset_url('app/assets/index.svg') }}">
+    <link rel="alternate" type="application/rss+xml" title="{{ site_name }}" href="{{ app_url('feed.xml') }}">
     <link rel="stylesheet" href="{{ app_url('app/assets/index.css') }}?v={{ app_version }}">
     {% block head %}{% endblock %}
 </head>

@@ -7,6 +7,7 @@ use League\CommonMark\Environment\Environment;
 use League\CommonMark\Extension\Autolink\AutolinkExtension;
 use League\CommonMark\Extension\CommonMark\CommonMarkCoreExtension;
 use League\CommonMark\Extension\CommonMark\Node\Inline\Image;
+use League\CommonMark\Extension\CommonMark\Node\Inline\Link;
 use League\CommonMark\Extension\DefaultAttributes\DefaultAttributesExtension;
 use League\CommonMark\Extension\Mention\Mention;
 use League\CommonMark\Extension\Mention\MentionExtension;
@@ -49,6 +50,9 @@ final class Markdown
             'max_nesting_level' => 100,
             'default_attributes' => [
                 Image::class => ['loading' => 'lazy', 'referrerpolicy' => 'no-referrer'],
+                // Google SEO 指南：论坛正文属用户生成内容，站外链接一律 nofollow ugc 不导权；
+                // 站内相对链接（提及、楼层、引用主题）保持可跟随，闭包返回 null 即不写 rel
+                Link::class => ['rel' => static fn(Link $node): ?string => preg_match('#^https?://#i', $node->getUrl()) ? 'nofollow ugc' : null],
             ],
             'mentions' => [
                 'user' => [

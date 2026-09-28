@@ -1435,7 +1435,10 @@ function seo_pad_description(string $description, string $title = ''): string
         if (mb_strlen($description) >= 150) break;
         $p = trim($p);
         if ($p === '' || mb_strpos($description, $p) !== false) continue;
-        $description = rtrim($description, "。．.！!？?；; \t\n\r") . '。' . $p;
+        // 不能用 rtrim 剥句尾标点：rtrim 按字节工作，全角标点的 UTF-8 字节会误伤正文——
+        // 「！」= EF BC 81 里的 0x81 正是「流」(E6 B5 81) 的尾字节，剥掉后留下残缺序列，
+        // 经 Twig 转义被 ENT_SUBSTITUTE 替换成 U+FFFD 乱码进 meta description。/u 按整字符匹配才安全。
+        $description = (preg_replace('/[。．.！!？?；;\s]+$/u', '', $description) ?? $description) . '。' . $p;
     }
     return $description;
 }
@@ -2027,7 +2030,10 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
         ];
     } else {
         // 列表分页的 canonical 指到自身（带 p），sitemap 里的分页链接才不会被归并到第 1 页
-        $seo = page_seo('home', $p > 1 ? ['p' => $p] : [], $brand . '：' . default_site_description());
+        // 首页 description 优先用后台站点描述（一句完整定位语）；再用品牌句兜底会与 pad 补充的
+        // 站点描述语义重复，拼出堆叠的长描述
+        $home_desc = trim((string)(settings_cache()['site_description'] ?? ''));
+        $seo = page_seo('home', $p > 1 ? ['p' => $p] : [], $home_desc !== '' ? $home_desc : $brand . '：' . default_site_description());
     }
     $search_query = $q !== '' ? 'q=' . rawurlencode($q) . '&field=' . $search_field . '&' : '';
     $tab_items = ['comment' => ['label' => '新评论', 'href' => $url($search_query . 'sort=comment')], 'post' => ['label' => '新帖子', 'href' => $url($search_query . 'sort=post')]];

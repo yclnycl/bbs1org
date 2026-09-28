@@ -2716,7 +2716,11 @@ function sitemap_xml_response(string $xml): never
 {
     header('Content-Type: application/xml; charset=UTF-8');
     header('Cache-Control: public, max-age=3600');
-    echo $xml;
+    // 浏览器直接打开时 XML 默认无样式，深色主题下透明背景黑底黑字像打不开；
+    // 挂一个只管观感的 CSS，搜索引擎与工具照常按纯 XML 解析
+    $pi = '<?xml-stylesheet type="text/css" href="' . h(app_url('app/assets/sitemap.css')) . '?v=' . APP_VERSION . '"?>';
+    $xml = preg_replace('/^<\?xml[^?]*\?>/', '$0' . "\n" . $pi, $xml, 1, $count);
+    echo $count === 1 ? $xml : $pi . "\n" . $xml;
     exit;
 }
 

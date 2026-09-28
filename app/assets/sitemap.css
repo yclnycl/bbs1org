@@ -1,0 +1,49 @@
+/* sitemap.xml 的浏览器阅读样式：数据与解析不变，只让人眼看着舒服（含深色模式） */
+urlset, sitemapindex {
+    display: block;
+    margin: 0;
+    padding: 24px 18px 48px;
+    background: #f6f8fb;
+    color: #1c2733;
+    font: 14px/1.7 -apple-system, "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+}
+urlset > url, sitemapindex > sitemap {
+    display: block;
+    margin: 0 0 10px;
+    padding: 10px 14px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    max-width: 980px;
+}
+loc {
+    display: block;
+    color: #1a56db;
+    font-weight: 600;
+    word-break: break-all;
+}
+lastmod {
+    display: block;
+    margin-top: 2px;
+    color: #5b6b7c;
+    font-size: 12.5px;
+}
+[hreflang] {
+    display: block;
+    color: #8794a3;
+    font-size: 12px;
+    word-break: break-all;
+}
+@media (prefers-color-scheme: dark) {
+    urlset, sitemapindex {
+        background: #0f1720;
+        color: #dbe4ee;
+    }
+    urlset > url, sitemapindex > sitemap {
+        background: #16212c;
+        border-color: #24313f;
+    }
+    loc { color: #6ea8ff; }
+    lastmod { color: #93a4b5; }
+    [hreflang] { color: #6b7c8e; }
+}

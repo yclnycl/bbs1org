@@ -17,7 +17,7 @@
             {% else %}
                 {% if q == '' %}
                     <div class="mobile-forum-strip">
-                        <a class="mobile-forum-link{{ fid ? '' : ' active' }}" href="{{ route_url('home') }}">全部</a>
+                        <a class="mobile-forum-link{{ fid ? '' : ' active' }}" href="{{ route_url('home') }}">{{ '全部'|t }}</a>
                         {% for f in mobile_forums %}
                             <a class="mobile-forum-link{{ f.id == fid ? ' active' : '' }}" href="{{ route_url('forum', {id: f.id}) }}">{{ f.name }}</a>
                         {% endfor %}
@@ -25,16 +25,16 @@
                 {% endif %}
                 <div class="topic-toolbar">
                     {{ ui.tabs(tab_items, sort) }}
-                    {% if can_speak() %}<a class="tab-post" href="{{ route_url('topic_edit', fid ? {fid: fid} : {}) }}">+ 发帖</a>{% endif %}
+                    {% if can_speak() %}<a class="tab-post" href="{{ route_url('topic_edit', fid ? {fid: fid} : {}) }}">{{ '+ 发帖'|t }}</a>{% endif %}
                 </div>
             {% endif %}
             <ul class="post-list">
                 {% if profile_uid and profile_tab_allowed and profile_tab == 'notifications' %}
                     {% if not rows %}
-                        <li class="empty-state">暂无通知</li>
+                        <li class="empty-state">{{ '暂无通知'|t }}</li>
                     {% else %}
                         {% for n in notification_rows %}
-                            {% if n.divider %}<li class="notification-read-divider">下面的通知已读</li>{% endif %}
+                            {% if n.divider %}<li class="notification-read-divider">{{ '下面的通知已读'|t }}</li>{% endif %}
                             {{ ui.notification_row(n.row) }}
                         {% endfor %}
                     {% endif %}

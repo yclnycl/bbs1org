@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="{{ current_lang() == default_lang() ? 'zh-CN' : current_lang() }}">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -7,6 +7,7 @@
     {% if seo_keywords != '' %}<meta name="keywords" content="{{ seo_keywords }}">{% endif %}
     {% if site_description != '' %}<meta name="description" content="{{ site_description }}">{% endif %}
     {% if seo_canonical %}<link rel="canonical" href="{{ seo_canonical }}">{% endif %}
+    {% for alt_lang, alt_url in lang_alternates %}<link rel="alternate" hreflang="{{ alt_lang }}" href="{{ alt_url }}">{% endfor %}
     {% if seo_noindex %}<meta name="robots" content="noindex">{% endif %}
     {% if setting('google_verification') != '' %}<meta name="google-site-verification" content="{{ setting('google_verification') }}">{% endif %}
     {% if setting('baidu_verification') != '' %}<meta name="baidu-site-verification" content="{{ setting('baidu_verification') }}">{% endif %}
@@ -20,7 +21,7 @@
     <meta property="og:type" content="{{ seo_og_type }}">
     <meta property="og:title" content="{{ page_title }}">
     <meta property="og:url" content="{{ seo_canonical ?: app_url() }}">
-    <meta property="og:locale" content="zh_CN">
+    <meta property="og:locale" content="{{ current_lang() == default_lang() ? 'zh_CN' : (current_lang() == 'en' ? 'en_US' : current_lang()) }}">
     {% if site_description != '' %}<meta property="og:description" content="{{ site_description }}">{% endif %}
     {% if seo_image != '' %}<meta property="og:image" content="{{ seo_image }}">{% endif %}
     <meta name="twitter:card" content="{{ seo_image != '' ? 'summary_large_image' : 'summary' }}">
@@ -29,12 +30,19 @@
     {% if seo_image != '' %}<meta name="twitter:image" content="{{ seo_image }}">{% endif %}
     {{ seo_jsonld|raw }}
     <link rel="icon" type="image/svg+xml" href="{{ asset_url('app/assets/index.svg') }}">
-    <link rel="alternate" type="application/rss+xml" title="{{ site_name }}" href="{{ app_url('feed.xml') }}">
+    <link rel="alternate" type="application/rss+xml" title="{{ site_name }}" href="{{ route_url('feed.xml') }}">
     <link rel="stylesheet" href="{{ app_url('app/assets/index.css') }}?v={{ app_version }}">
     {% block head %}{% endblock %}
 </head>
-<body data-contact-qr="{{ asset_url('app/assets/contact-qr.png') }}?v={{ app_version }}">
-<a class="skip-link" href="#main">跳到主要内容</a>
+<body data-contact-qr="{{ asset_url('app/assets/contact-qr.png') }}?v={{ app_version }}" data-contact-qr-title="{{ '添加微信'|t }}" data-contact-qr-alt="{{ '微信二维码'|t }}" data-contact-qr-hint="{{ '联系方式已隐藏。打开微信「扫一扫」扫描二维码，或在手机上长按识别二维码添加好友。'|t }}" data-contact-qr-aria="{{ '联系方式已隐藏，点击查看添加方式'|t }}" data-contact-qr-more="{{ '点击查看'|t }}">
+<a class="skip-link" href="#main">{{ '跳到主要内容'|t }}</a>
+{% if i18n_banner %}
+<div class="lang-banner" id="lang-banner">
+    <span>{{ '根据你的浏览器语言，已为你切换到英文版。'|t }}</span>
+    <a href="{{ lang_switch_url(default_lang()) }}">{{ '切换到中文'|t }}</a>
+    <button type="button" class="lang-banner-close" data-lang-banner-close aria-label="{{ '关闭'|t }}">{{ '继续使用英文'|t }}</button>
+</div>
+{% endif %}
 {% include 'nav.html.twig' with {nav: nav} only %}
 <main class="wrap" id="main">
     {% block content %}{% endblock %}

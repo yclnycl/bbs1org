@@ -18,6 +18,7 @@ use app\optional\Model\User;
 use app\optional\Model\ViewStat;
 use app\optional\Search;
 use app\optional\TopicTDK;
+use app\optional\Translator;
 if (!is_file(__DIR__ . '/vendor/autoload.php')) {
     header('Content-Type: text/plain; charset=utf-8');
     exit("缺少依赖：请先在项目根目录执行 composer install 后再运行本程序。\n");
@@ -42,6 +43,9 @@ define('COOKIE_TTL', 15552000);
 define('AUTH_COOKIE_NAME', 'bbs_auth');
 define('AUTH_COOKIE_TTL', COOKIE_TTL);
 define('CSRF_COOKIE_NAME', 'bbs_csrf');
+// 多语言：默认语言不带前缀，其他语言走 /{lang}/ 子目录（/en/topic/5）；语言偏好记忆在浏览器里
+define('DEFAULT_LANG', 'zh');
+define('LANG_COOKIE_NAME', 'bbs_lang');
 spl_autoload_register(static function (string $class_name): void {
     $class_file = APP_ROOT . '/' . str_replace('\\', '/', $class_name) . '.php';
     if (is_file($class_file)) require_once $class_file;
@@ -185,6 +189,19 @@ function attach_topic_list_users(array $rows): array
         $row['last_reply_username'] = $last_reply_uid > 0 ? (string)(($users[$last_reply_uid] ?? null)?->username ?? '') : '';
     }
     unset($row);
+    return attach_topic_list_titles($rows);
+}
+/** 列表标题多语言：非默认语言下批量取译文标题覆盖（一次 IN 查询），无译文的仍显示中文 */
+function attach_topic_list_titles(array $rows): array
+{
+    $lang = current_lang();
+    if ($lang === DEFAULT_LANG || $rows === [] || !class_exists(Translator::class)) return $rows;
+    $titles = Translator::topic_titles($lang, array_column($rows, 'id'));
+    foreach ($rows as &$row) {
+        $title = (string)($titles[(int)($row['id'] ?? 0)]['title'] ?? '');
+        if ($title !== '') $row['title'] = $title;
+    }
+    unset($row);
     return $rows;
 }
 function db_schema_ready(): bool
@@ -213,6 +230,11 @@ function default_settings(): array
         'post_interval_seconds' => '5',
         'baidu_verification' => 'codeva-o0vee5lpeB',
         'baidu_tongji_url' => '',
+        // 多语言：逗号分隔的启用语言码（不含默认语言 zh），留空=整站关闭多语言
+        'i18n_enabled_langs' => 'en',
+        'i18n_batch_size' => '3',
+        'i18n_interval_seconds' => '120',
+        'i18n_timeout' => '60',
         // 详情页 TDK 队列生成：密钥走环境变量 DEEPSEEK_API_KEY，不在库与代码中存放
         'tdk_enabled' => '1',
         'tdk_ai_enabled' => '1',
@@ -359,7 +381,23 @@ function clean_site_base_url(string $url): string
 function forums_cache(bool $refresh = false): array
 {
     if ($refresh) unset($GLOBALS['__forums_cache'], $GLOBALS['__forum_by_id_map']);
-    return $GLOBALS['__forums_cache'] ??= Forum::query()->orderBy('sort')->orderBy('id')->get()->toArray();
+    return $GLOBALS['__forums_cache'] ??= forum_rows_localized();
+}
+/** 版块行：非默认语言下用译文覆盖名称与介绍（无译文回落中文），导航/徽标/面包屑/下拉全部自动跟随 */
+function forum_rows_localized(): array
+{
+    $rows = Forum::query()->orderBy('sort')->orderBy('id')->get()->toArray();
+    $lang = current_lang();
+    if ($lang === DEFAULT_LANG || !class_exists(Translator::class)) return $rows;
+    foreach ($rows as &$row) {
+        $content = Translator::content_for($lang, 'forum', (int)$row['id']);
+        if ($content !== null) {
+            if ($content['title'] !== '') $row['name'] = $content['title'];
+            if ($content['body'] !== '') $row['description'] = $content['body'];
+        }
+    }
+    unset($row);
+    return $rows;
 }
 function forum_by_id(int $id): ?array
 {
@@ -530,27 +568,34 @@ function record_view_stat(): void
 function mobile_menu_content_html(?array $mine = null, ?array $forums = null): string
 {
     $forums ??= array_values(array_filter(forums_cache(), fn($forum) => forum_group_allowed($forum, 'allow_view_groups')));
-    $forum_links = [['text' => '全部', 'url' => route_url('home')]];
+    $forum_links = [['text' => t('全部'), 'url' => route_url('home')]];
     foreach ($forums as $f) {
         $forum_links[] = ['text' => (string)$f['name'], 'url' => route_url('forum', ['id' => (int)$f['id']])];
     }
     $my_links = [];
     if ($mine) {
         $uid = (int)$mine['id'];
-        $my_links[] = ['text' => '我的主页', 'url' => route_url('user', ['id' => $uid])];
-        $my_links[] = ['text' => '我的主题', 'url' => route_url('user', ['id' => $uid, 'tab' => 'topics'])];
-        $my_links[] = ['text' => '我的回帖', 'url' => route_url('user', ['id' => $uid, 'tab' => 'replies'])];
-        $my_links[] = ['text' => '我的通知', 'url' => route_url('user', ['id' => $uid, 'tab' => 'notifications'])];
-        $my_links[] = ['text' => '个人设置', 'url' => route_url('profile')];
-        if (can_access_admin()) $my_links[] = ['text' => '后台面板', 'url' => route_url('admin')];
+        $my_links[] = ['text' => t('我的主页'), 'url' => route_url('user', ['id' => $uid])];
+        $my_links[] = ['text' => t('我的主题'), 'url' => route_url('user', ['id' => $uid, 'tab' => 'topics'])];
+        $my_links[] = ['text' => t('我的回帖'), 'url' => route_url('user', ['id' => $uid, 'tab' => 'replies'])];
+        $my_links[] = ['text' => t('我的通知'), 'url' => route_url('user', ['id' => $uid, 'tab' => 'notifications'])];
+        $my_links[] = ['text' => t('个人设置'), 'url' => route_url('profile')];
+        if (can_access_admin()) $my_links[] = ['text' => t('后台面板'), 'url' => route_url('admin')];
     } else {
-        $my_links[] = ['text' => '登录', 'url' => route_url('login')];
-        if (setting('allow_register', '1') === '1') $my_links[] = ['text' => '注册', 'url' => route_url('register')];
+        $my_links[] = ['text' => t('登录'), 'url' => route_url('login')];
+        if (setting('allow_register', '1') === '1') $my_links[] = ['text' => t('注册'), 'url' => route_url('register')];
     }
-    return template('mobile_menu.html.twig', ['sections' => [
-        ['title' => '版块列表', 'links' => $forum_links],
-        ['title' => '我的菜单', 'links' => $my_links],
-    ]]);
+    $sections = [
+        ['title' => t('版块列表'), 'links' => $forum_links],
+        ['title' => t('我的菜单'), 'links' => $my_links],
+    ];
+    // 语言切换走 /lang 端点：先写偏好 cookie 再跳目标语言页面，避免被语言协商跳回
+    if (enabled_langs()) {
+        $lang_links = [['text' => '中文', 'url' => lang_switch_url(DEFAULT_LANG)]];
+        foreach (enabled_langs() as $lang) $lang_links[] = ['text' => strtoupper($lang), 'url' => lang_switch_url($lang)];
+        $sections[] = ['title' => t('语言'), 'links' => $lang_links];
+    }
+    return template('mobile_menu.html.twig', ['sections' => $sections]);
 }
 function now(): int
 {
@@ -865,11 +910,11 @@ function cut(string $v, int $max): string
 function human_time(int $ts): string
 {
     $diff = time() - $ts;
-    if ($diff < 60) $text = '刚刚';
-    elseif ($diff < 3600) $text = floor($diff / 60) . '分钟前';
-    elseif ($diff < 86400) $text = floor($diff / 3600) . '小时前';
-    elseif ($diff < 172800) $text = '昨天';
-    elseif ($diff < 604800) $text = floor($diff / 86400) . '天前';
+    if ($diff < 60) $text = t('刚刚');
+    elseif ($diff < 3600) $text = floor($diff / 60) . t('分钟前');
+    elseif ($diff < 86400) $text = floor($diff / 3600) . t('小时前');
+    elseif ($diff < 172800) $text = t('昨天');
+    elseif ($diff < 604800) $text = floor($diff / 86400) . t('天前');
     else $text = date('Y-m-d', $ts);
     // 包一层 <time datetime>：搜索引擎与 AI 引擎靠机器可读时间戳判定内容新鲜度
     return '<time datetime="' . sitemap_w3c($ts) . '">' . $text . '</time>';
@@ -877,7 +922,7 @@ function human_time(int $ts): string
 /** SEO：站点默认一句话介绍——后台 site_description 留空时兜底 */
 function default_site_description(): string
 {
-    return '旧衣回收、出口行情与政策法规的行业资讯与交流社区。';
+    return t('旧衣回收、出口行情与政策法规的行业资讯与交流社区。');
 }
 /** 收费模式：联系方式脱敏——手机号、座机/400、邮箱、微信号、QQ 号一律替换为 ****** */
 function mask_contacts(string $text): string
@@ -943,12 +988,12 @@ function forum_child_ids(int $fid, bool $viewable_only = false): array
 /** SEO：首页 <title> 的业务词后缀 */
 function home_title_suffix(): string
 {
-    return '旧衣回收与出口行业资讯';
+    return t('旧衣回收与出口行业资讯');
 }
 /** SEO：首页 <title> 的补充定位语——把标题拼到 Bing 建议的 50-60 字符区间，纯"站名 - 后缀"仅 21 字会被判过短 */
 function home_title_tagline(): string
 {
-    return '行情数据、政策法规与供应信息每日更新';
+    return t('行情数据、政策法规与供应信息每日更新');
 }
 /** SEO：JSON-LD 输出编码——HEX_TAG 防止标题正文里的 `</script>` 提前闭合标签 */
 function seo_jsonld_script(array $objects): string
@@ -1024,12 +1069,19 @@ function admin_url(array $params = []): string
 {
     return route_url('admin', $params);
 }
-/** 路由名即路径首段：home 是站点根，其余形如 /topic/12、/admin?tab=groups */
-function route_url(string $a = 'home', array $params = []): string
+/** 路由名即路径首段：home 是站点根，其余形如 /topic/12、/admin?tab=groups；非默认语言自动带 /{lang}/ 前缀 */
+function route_url(string $a = 'home', array $params = [], ?string $lang = null): string
 {
     unset($params['a']);
-    if ($a === 'home') return $params ? append_url_query(app_url(''), $params) : app_url();
-    $segments = [rawurlencode($a)];
+    $lang = $lang ?? current_lang();
+    $prefix = $lang === DEFAULT_LANG ? '' : $lang . '/';
+    if ($a === 'home') {
+        $url = app_url($prefix === '' ? '' : rtrim($prefix, '/'));
+        return $params ? append_url_query($url, $params) : $url;
+    }
+    $segments = [];
+    if ($prefix !== '') $segments[] = $lang;
+    $segments[] = rawurlencode($a);
     if (isset($params['id']) && ctype_digit((string)$params['id'])) {
         $segments[] = rawurlencode((string)$params['id']);
         unset($params['id']);
@@ -1040,6 +1092,148 @@ function asset_url(string $file): string
 {
     return app_url($file);
 }
+/* ==================== 多语言：中文用户中文站，非中文用户英文站 ==================== */
+
+/** 已启用的非默认语言码列表（i18n_enabled_langs，逗号分隔两位语言码），空数组=整站关闭多语言 */
+function enabled_langs(): array
+{
+    static $langs = null;
+    if ($langs !== null) return $langs;
+    $langs = [];
+    foreach (explode(',', (string)setting('i18n_enabled_langs', '')) as $code) {
+        $code = strtolower(trim($code));
+        if (preg_match('/^[a-z]{2}$/', $code) && $code !== DEFAULT_LANG && !in_array($code, $langs, true)) $langs[] = $code;
+    }
+    return $langs;
+}
+
+function current_lang(): string
+{
+    return (string)($GLOBALS['__lang'] ?? DEFAULT_LANG);
+}
+
+function default_lang(): string
+{
+    return DEFAULT_LANG;
+}
+
+/**
+ * 界面文案翻译：默认语言原样返回；其他语言查 app/i18n/{lang}.php（键=中文源文案，值=译文），
+ * 缺词条回落中文，模板可以渐进补词条而不会出现空白。
+ */
+function t(string $text): string
+{
+    $lang = current_lang();
+    if ($lang === DEFAULT_LANG) return $text;
+    static $dicts = [];
+    if (!isset($dicts[$lang])) {
+        $file = APP_DIR . '/i18n/' . basename($lang) . '.php';
+        $dicts[$lang] = is_file($file) ? (array)(include $file) : [];
+    }
+    return (string)($dicts[$lang][$text] ?? $text);
+}
+
+/** 解析 Accept-Language 为按 q 值降序排列的语言标签列表（非法片段与 q=0 的丢弃） */
+function accept_lang_prefs(): array
+{
+    $prefs = [];
+    foreach (explode(',', (string)($_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? '')) as $part) {
+        $pieces = array_map('trim', explode(';', $part));
+        $tag = strtolower($pieces[0] ?? '');
+        if (!preg_match('/^[a-z]{2,8}(-[a-zA-Z0-9]+)*$/', $tag)) continue;
+        $q = 1.0;
+        foreach (array_slice($pieces, 1) as $param) {
+            if (str_starts_with($param, 'q=')) $q = (float)substr($param, 2);
+        }
+        if ($q <= 0) continue;
+        $prefs[$tag] = max($prefs[$tag] ?? 0.0, $q);
+    }
+    arsort($prefs);
+    return array_keys($prefs);
+}
+
+/**
+ * 语言协商：cookie 里的显式选择优先；否则按 Accept-Language 与已启用语言前缀匹配——
+ * 命中 zh 前缀（含 zh-CN/zh-TW）用中文站，命中 en/fr 等前缀用对应语言站，全部不匹配的
+ * 非中文访客落第一个启用语言（英文站）。返回 null 表示多语言未启用。
+ */
+function negotiate_lang(): ?string
+{
+    $langs = enabled_langs();
+    if (!$langs) return null;
+    $cookie = strtolower(trim((string)($_COOKIE[LANG_COOKIE_NAME] ?? '')));
+    if ($cookie === DEFAULT_LANG || in_array($cookie, $langs, true)) return $cookie;
+    foreach (accept_lang_prefs() as $tag) {
+        if (str_starts_with($tag, DEFAULT_LANG)) return DEFAULT_LANG;
+        foreach ($langs as $lang) {
+            if (str_starts_with($tag, $lang)) return $lang;
+        }
+    }
+    return $langs[0];
+}
+
+/** 爬虫/链接预览机器人/命令行客户端不做语言跳转：搜索引擎必须拿到稳定的语言版本，而不是 302 出的个性化结果 */
+function request_is_bot(): bool
+{
+    static $bot = null;
+    if ($bot !== null) return $bot;
+    $ua = strtolower((string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
+    if ($ua === '') return $bot = true;
+    return $bot = (bool)preg_match('/bot|crawl|spider|slurp|curl|wget|python|java\/|okhttp|libwww|httpclient|headless|lighthouse|pagespeed|monitor|preview|facebookexternalhit|skypeuripreview|discordapp|slack|telegrambot|whatsapp/i', $ua);
+}
+
+/** 当前请求页面在指定语言下的地址（语言切换器与 hreflang 共用） */
+function lang_url(string $lang): string
+{
+    $params = $_GET;
+    $a = (string)($params['a'] ?? 'home');
+    unset($params['a'], $params['id']);
+    return route_url($a, $params, $lang);
+}
+
+/** 切换到指定语言的链接（先经 /lang 写偏好 cookie 再跳目标页，否则会被语言协商跳回来） */
+function lang_switch_url(string $lang): string
+{
+    return append_url_query(route_url('lang'), ['to' => $lang, 'back' => lang_url($lang)]);
+}
+
+/** 语言切换端点（/lang?to=en&back=/topic/5）：写偏好 cookie 后跳回目标页面，back 只接受站内路径 */
+function lang_switch_route(): void
+{
+    $to = strtolower(trim((string)($_GET['to'] ?? '')));
+    if ($to !== DEFAULT_LANG && !in_array($to, enabled_langs(), true)) err('不支持的语言');
+    app_cookie(LANG_COOKIE_NAME, $to, time() + COOKIE_TTL, true, false);
+    $back = (string)($_GET['back'] ?? '');
+    go($back !== '' && str_starts_with($back, '/') && !str_starts_with($back, '//') && !str_starts_with($back, '/lang') ? $back : route_url('home', [], $to));
+}
+
+/**
+ * 路由前缀校验：parse_path_route() 摘出的两字母语言段若未启用（含多语言整体关闭），
+ * 还原成未知路由走 404，与该路径本来不存在时的行为一致。
+ */
+function i18n_init(): void
+{
+    $lang = (string)($GLOBALS['__lang'] ?? '');
+    if ($lang === '' || in_array($lang, enabled_langs(), true)) return;
+    $_GET['a'] = $lang;
+    unset($_GET['id']);
+    $GLOBALS['__lang'] = DEFAULT_LANG;
+}
+
+/** 语言跳转：只服务普通浏览页（白名单路由），机器可读出口与功能性路由一律不跳 */
+function i18n_redirect_guard(string $route): void
+{
+    if (is_post_request() || ajax_request() || request_is_bot()) return;
+    if (preg_match('/\.(?:xml|txt)$/D', $route) || str_starts_with($route, 'sitemap-topics-')) return;
+    static $pages = ['home', 'forum', 'topic', 'user', 'search', 'login', 'register', 'profile', 'form_error'];
+    if (!in_array($route, $pages, true)) return;
+    $target = negotiate_lang();
+    if ($target === null || $target === current_lang()) return;
+    $params = $_GET;
+    unset($params['a'], $params['id']);
+    go(route_url($route, $params, $target));
+}
+
 function parse_path_route(): void
 {
     $path = (string)(parse_url((string)($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH) ?? '');
@@ -1049,6 +1243,13 @@ function parse_path_route(): void
     $path = trim($path, '/');
     if ($path === '' || $path === basename($script)) return;
     $segments = array_values(array_filter(explode('/', $path), 'strlen'));
+    // 语言前缀先摘出来（/en/topic/5 的 "en" 不进路由表）。这里只做结构判断，
+    // 语言是否真的启用由 i18n_init() 在设置可用后校验，未启用会还原回未知路由走 404。
+    // 注意：路由名因此不允许出现恰好两个小写字母的取值。
+    if (isset($segments[0]) && preg_match('/^[a-z]{2}$/', $segments[0])) {
+        $GLOBALS['__lang'] = array_shift($segments);
+        $segments = array_values($segments);
+    }
     if (isset($segments[0]) && $segments[0] !== 'a' && !array_key_exists('a', $_GET)) $_GET['a'] = rawurldecode($segments[0]);
     if (isset($segments[1]) && ctype_digit($segments[1]) && !array_key_exists('id', $_GET)) $_GET['id'] = rawurldecode($segments[1]);
 }
@@ -1200,12 +1401,14 @@ function twig(bool $cache = true): Twig\Environment
     ]);
     // 模板里只保留「取数据」的函数，页面标记一律由 templates/macros 下的宏负责
     foreach (['route_url', 'admin_url', 'asset_url', 'app_url', 'human_time', 'flash_json'] as $fn) $env->addFunction(new Twig\TwigFunction($fn, $fn, ['is_safe' => ['html']]));
-    foreach (['setting', 'csrf_token', 'uid', 'me', 'group_by_id', 'can_manage', 'can_speak', 'can_access_admin', 'is_super_user', 'can_manage_topic', 'can_manage_reply', 'notification_excerpt', 'excerpt_length', 'notification_link', 'length_limits', 'max_pagination_pages', 'append_url_query', 'post_forum_options', 'admin_tabs', 'turnstile_enabled', 'turnstile_site_key'] as $fn) $env->addFunction(new Twig\TwigFunction($fn, $fn));
+    foreach (['setting', 'csrf_token', 'uid', 'me', 'group_by_id', 'can_manage', 'can_speak', 'can_access_admin', 'is_super_user', 'can_manage_topic', 'can_manage_reply', 'notification_excerpt', 'excerpt_length', 'notification_link', 'length_limits', 'max_pagination_pages', 'append_url_query', 'post_forum_options', 'admin_tabs', 'turnstile_enabled', 'turnstile_site_key', 't', 'current_lang', 'lang_url', 'lang_switch_url', 'enabled_langs', 'default_lang'] as $fn) $env->addFunction(new Twig\TwigFunction($fn, $fn));
     // 正文是富文本渲染（Markdown 子集 + 提及/楼层链接），属于文本转换而非页面结构，保留为过滤器
     $env->addFilter(new Twig\TwigFilter('markdown', markdown_html(...), ['is_safe' => ['html']]));
     $env->addFilter(new Twig\TwigFilter('notification_content', notification_content_html(...), ['is_safe' => ['html']]));
     // 统计脚本地址进 JS 字符串：整段 |e('js') 会把 URL 打成 \x3A 不可读，这里只转义真正危险的字符
     $env->addFilter(new Twig\TwigFilter('js_string', js_string_escape(...)));
+    // 界面文案翻译：zh 原样返回，其他语言查字典，缺词回落中文
+    $env->addFilter(new Twig\TwigFilter('t', t(...)));
     $env->addGlobal('app_version', APP_VERSION);
     return $envs[$cache] = $env;
 }
@@ -1297,11 +1500,11 @@ function page_common_data(string $title, array $seo = []): array
         '@id' => $base . '/#website',
         'name' => $site_name_title,
         'url' => $base . '/',
-        'inLanguage' => 'zh-CN',
+        'inLanguage' => current_lang() === DEFAULT_LANG ? 'zh-CN' : current_lang(),
         'publisher' => ['@id' => $base . '/#organization'],
         'potentialAction' => [
             '@type' => 'SearchAction',
-            'target' => ['@type' => 'EntryPoint', 'urlTemplate' => absolute_url(app_url('search')) . '?q={q}'],
+            'target' => ['@type' => 'EntryPoint', 'urlTemplate' => absolute_url(route_url('search')) . '?q={q}'],
             'query-input' => 'required name=q',
         ],
     ];
@@ -1323,7 +1526,23 @@ function page_common_data(string $title, array $seo = []): array
         'page_title' => $page_title,
         'flash' => $flash,
         'nav' => page_nav_data($site_name),
+        // hreflang 互补链接与 x-default（非中文访客默认英文版），只在可索引的公共页输出
+        'lang_alternates' => lang_alternates(),
+        // 自动语言跳转后、用户尚未做出选择时显示一次性的「切换到中文」提示条
+        'i18n_banner' => current_lang() !== DEFAULT_LANG && (string)($_COOKIE[LANG_COOKIE_NAME] ?? '') === '',
     ];
+}
+/** 当前公共页在各语言下的绝对地址表（zh-CN / 各启用语言 / x-default→首选非中文语言），多语言关闭或非公共页返回空 */
+function lang_alternates(): array
+{
+    static $pages = ['home', 'forum', 'topic'];
+    $langs = enabled_langs();
+    $route = (string)($_GET['a'] ?? 'home');
+    if (!$langs || !in_array($route, $pages, true) || is_post_request()) return [];
+    $alternates = [DEFAULT_LANG => absolute_url(lang_url(DEFAULT_LANG))];
+    foreach ($langs as $lang) $alternates[$lang] = absolute_url(lang_url($lang));
+    $alternates['x-default'] = $alternates[$langs[0]];
+    return $alternates;
 }
 function render_page(string $template, array $data, string $title, array $seo = []): void
 {
@@ -1767,8 +1986,8 @@ function login_page(): void
     }
     render_page('login.html.twig', [
         'auth_tabs' => auth_tab_items(),
-        'notice_title' => '登录注意事项',
-        'notice_items' => ['请使用用户名登录。', '密码区分大小写。', '公共设备登录后请及时退出。'],
+        'notice_title' => t('登录注意事项'),
+        'notice_items' => [t('请使用用户名登录。'), t('密码区分大小写。'), t('公共设备登录后请及时退出。')],
     ], '登录');
 }
 function register_page(): void
@@ -1786,8 +2005,8 @@ function register_page(): void
     }
     render_page('register.html.twig', [
         'auth_tabs' => auth_tab_items(),
-        'notice_title' => '注册注意事项',
-        'notice_items' => ['邮箱信息不会公开。', '请不要使用保留用户名或冒充他人。'],
+        'notice_title' => t('注册注意事项'),
+        'notice_items' => [t('邮箱信息不会公开。'), t('请不要使用保留用户名或冒充他人。')],
     ], '注册');
 }
 function profile_page(): void
@@ -1960,16 +2179,16 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
     $q = '';
     $search_field = 'title';
     $profile_tabs = [
-        'topics' => ['label' => '主题', 'href' => $url('tab=topics')],
-        'replies' => ['label' => '回帖', 'href' => $url('tab=replies')],
+        'topics' => ['label' => t('主题'), 'href' => $url('tab=topics')],
+        'replies' => ['label' => t('回帖'), 'href' => $url('tab=replies')],
     ];
-    if ($own_profile) $profile_tabs['notifications'] = ['label' => '通知', 'href' => $url('tab=notifications')];
+    if ($own_profile) $profile_tabs['notifications'] = ['label' => t('通知'), 'href' => $url('tab=notifications')];
     if ($profile_uid) {
         if (!array_key_exists($profile_tab, $profile_tabs)) $profile_tab = 'topics';
     }
     if ($own_profile) {
-        $profile_tabs['profile_settings'] = ['label' => '设置', 'href' => route_url('profile'), 'class' => 'tab-mobile-action'];
-        if (can_access_admin()) $profile_tabs['admin'] = ['label' => '后台', 'href' => route_url('admin'), 'class' => 'tab-mobile-action'];
+        $profile_tabs['profile_settings'] = ['label' => t('设置'), 'href' => route_url('profile'), 'class' => 'tab-mobile-action'];
+        if (can_access_admin()) $profile_tabs['admin'] = ['label' => t('后台'), 'href' => route_url('admin'), 'class' => 'tab-mobile-action'];
     }
     $profile_tab_allowed = true;
     $profile_tab_notice = '';
@@ -1981,7 +2200,7 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
     // 可见 h1 的副行：版块页放版块描述、首页放站点一句话（与 description meta 同源），资料页没有 h1 也就不要副行
     $page_h1_sub = $profile_uid ? ''
         : ($filter_forum ? trim((string)$filter_forum['description'])
-        : (trim((string)(settings_cache()['site_description'] ?? '')) ?: default_site_description()));
+        : (trim(t((string)(settings_cache()['site_description'] ?? ''))) ?: default_site_description()));
     // 二级分类 tab：父版块显示「全部分类 + 各子分类」，子版块显示「父级(聚合) + 同级各分类」
     $category_tabs = [];
     $category_active = '';
@@ -2000,7 +2219,7 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
             }
         } else {
             if (forum_child_ids($fid, true) !== []) {
-                $category_tabs['all'] = ['label' => '全部分类', 'href' => route_url('forum', ['id' => $fid])];
+                $category_tabs['all'] = ['label' => t('全部分类'), 'href' => route_url('forum', ['id' => $fid])];
                 foreach (forums_cache() as $sf) {
                     if ((int)($sf['parent_id'] ?? 0) !== $fid || !forum_group_allowed($sf, 'allow_view_groups')) continue;
                     $category_tabs['f' . (int)$sf['id']] = ['label' => (string)$sf['name'], 'href' => route_url('forum', ['id' => (int)$sf['id']])];
@@ -2028,14 +2247,14 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
                 '@id' => $forum_url . '#collection',
                 'url' => $forum_url,
                 'name' => (string)$filter_forum['name'],
-                'inLanguage' => 'zh-CN',
+                'inLanguage' => current_lang() === DEFAULT_LANG ? 'zh-CN' : current_lang(),
                 'isPartOf' => ['@id' => rtrim(base_url(), '/') . '/#website'],
             ],
             [
                 '@context' => 'https://schema.org',
                 '@type' => 'BreadcrumbList',
                 'itemListElement' => [
-                    ['@type' => 'ListItem', 'position' => 1, 'name' => '首页', 'item' => rtrim(base_url(), '/') . '/'],
+                    ['@type' => 'ListItem', 'position' => 1, 'name' => t('首页'), 'item' => rtrim(base_url(), '/') . '/'],
                     ['@type' => 'ListItem', 'position' => 2, 'name' => (string)$filter_forum['name'], 'item' => $forum_url],
                 ],
             ],
@@ -2044,11 +2263,11 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
         // 列表分页的 canonical 指到自身（带 p），sitemap 里的分页链接才不会被归并到第 1 页
         // 首页 description 优先用后台站点描述（一句完整定位语）；再用品牌句兜底会与 pad 补充的
         // 站点描述语义重复，拼出堆叠的长描述
-        $home_desc = trim((string)(settings_cache()['site_description'] ?? ''));
+        $home_desc = trim(t((string)(settings_cache()['site_description'] ?? '')));
         $seo = page_seo('home', $p > 1 ? ['p' => $p] : [], $home_desc !== '' ? $home_desc : $brand . '：' . default_site_description());
     }
     $search_query = $q !== '' ? 'q=' . rawurlencode($q) . '&field=' . $search_field . '&' : '';
-    $tab_items = ['comment' => ['label' => '新评论', 'href' => $url($search_query . 'sort=comment')], 'post' => ['label' => '新帖子', 'href' => $url($search_query . 'sort=post')]];
+    $tab_items = ['comment' => ['label' => t('新评论'), 'href' => $url($search_query . 'sort=comment')], 'post' => ['label' => t('新帖子'), 'href' => $url($search_query . 'sort=post')]];
     $list_rows = [];
     foreach (($data['rows'] ?? []) as $t) {
         $t['time'] = (int)($t['list_time'] ?? $t['my_reply_at'] ?? ($sort === 'post' ? $t['created_at'] : ($t['last_reply_at'] ?: $t['created_at'])));
@@ -2145,7 +2364,8 @@ function topic_page_view(array $view): array
         'can_reply_forum' => $can_reply_forum,
         'can_reply' => can_speak() && $can_reply_forum,
         'current_uid' => uid(),
-        'reply_status' => uid() ? (can_speak() ? ($can_reply_forum ? '说两句' : '无回帖权限') : '禁止发言') : '登录后回复',
+        'reply_status' => t(uid() ? (can_speak() ? ($can_reply_forum ? '说两句' : '无回帖权限') : '禁止发言') : '登录后回复'),
+        'i18n_pending' => (bool)($i18n_pending ?? false),
     ];
 }
 function topic_page(): void
@@ -2159,6 +2379,22 @@ function topic_page(): void
     if ($forum && !forum_group_allowed($forum, 'allow_view_groups')) err('无权限');
     // 收费模式版块：非管理员看到的内容先脱敏，标题/正文/摘要/TDK 全部走打码后的数据
     $t = mask_topic_contacts($t);
+    // 多语言：优先用译文（译文源自打码后文本，英文页对所有人一致）；缺译文先展示原文并登记响应后补翻。
+    // 管理员看收费版块拿到的是未打码原文，与译文指纹口径不同，直接跳过覆盖避免误判编辑。
+    $t_i18n = null;
+    if (current_lang() !== DEFAULT_LANG && !(forum_paid_mode((int)$t['forum_id']) && can_manage())) {
+        $t_i18n = Translator::content_for(current_lang(), 'topic', (int)$t['id']);
+        if ($t_i18n !== null) {
+            if ($t_i18n['fingerprint'] !== Translator::fingerprint((string)$t['title'], (string)$t['body'])) {
+                Translator::requeue(current_lang(), 'topic', (int)$t['id']);
+            }
+            if ($t_i18n['title'] !== '') $t['title'] = $t_i18n['title'];
+            if ($t_i18n['body'] !== '') $t['body'] = $t_i18n['body'];
+        } else {
+            $GLOBALS['__i18n_pending_topic'] = (int)$t['id'];
+            $GLOBALS['__i18n_pending_lang'] = current_lang();
+        }
+    }
     if (mark_viewed((int)$t['id'])) {
         Topic::whereKey($t['id'])->increment('view_count');
         record_view_stat();
@@ -2193,8 +2429,14 @@ function topic_page(): void
     $replies = apply_reply_floors($page_data['replies'], $t, $p, $size, $reply_desc);
     $view = compact('t', 'forum', 'replies', 'p', 'size', 'off', 'reply_desc', 'replyid', 'floor') + ['topic' => $t, 'page' => $p, 'page_size' => $size, 'offset' => $off, 'reply_order' => $reply_desc ? 1 : 0];
     $t_seo = page_seo('topic', ['id' => (int)$t['id']], (string)$t['body'], (string)$t['title']);
-    // TDK 队列生成结果优先：title/description 换成生成值（描述仍过补足规则保证不低于 Bing 下限），keywords 进 meta 与 JSON-LD
-    $t_tdk = TopicTDK::meta_for((int)$t['id']);
+    // 英文页的 SEO 描述直接用译文摘要；中文 TDK 队列结果只在中文页应用
+    if ($t_i18n !== null && trim($t_i18n['description']) !== '') {
+        $t_seo['description'] = trim($t_i18n['description']);
+        $t_tdk = null;
+    } else {
+        // TDK 队列生成结果优先：title/description 换成生成值（描述仍过补足规则保证不低于 Bing 下限），keywords 进 meta 与 JSON-LD
+        $t_tdk = current_lang() === DEFAULT_LANG ? TopicTDK::meta_for((int)$t['id']) : null;
+    }
     if ($t_tdk) {
         // 存量 TDK 生成于打码功能之前，收费版块（非管理员）应用时统一再脱敏一次
         if (forum_paid_mode((int)$t['forum_id']) && !can_manage()) {
@@ -2219,6 +2461,7 @@ function topic_page(): void
             '@id' => $topic_url . '#posting',
             'url' => $topic_url,
             'headline' => (string)$t['title'],
+            'inLanguage' => current_lang() === DEFAULT_LANG ? 'zh-CN' : current_lang(),
             'datePublished' => sitemap_w3c((int)$t['created_at']),
             'dateModified' => sitemap_w3c(max((int)$t['created_at'], (int)($t['last_reply_at'] ?: 0))),
             'author' => [
@@ -2236,7 +2479,7 @@ function topic_page(): void
             '@context' => 'https://schema.org',
             '@type' => 'BreadcrumbList',
             'itemListElement' => [
-                ['@type' => 'ListItem', 'position' => 1, 'name' => '首页', 'item' => $t_base . '/'],
+                ['@type' => 'ListItem', 'position' => 1, 'name' => t('首页'), 'item' => $t_base . '/'],
                 ['@type' => 'ListItem', 'position' => 2, 'name' => (string)$forum['name'], 'item' => absolute_url(route_url('forum', ['id' => (int)$forum['id']]))],
                 ['@type' => 'ListItem', 'position' => 3, 'name' => (string)$t['title'], 'item' => $topic_url],
             ],
@@ -2248,6 +2491,7 @@ function topic_page(): void
     $t_title_seo = isset($t_tdk_title) ? $t_tdk_title : (string)$t['title'];
     $t_title_cap = isset($t_tdk_title) ? (int)setting('tdk_title_max', '45') : 32;
     if (mb_strlen($t_title_seo) > $t_title_cap) $t_title_seo = cut($t_title_seo, $t_title_cap) . '…';
+    $view['i18n_pending'] = $t_i18n === null && current_lang() !== DEFAULT_LANG;
     render_page('topic.html.twig', topic_page_view($view), $t_title_seo . ' - ' . $forum['name'], $t_seo);
 }
 function topic_edit_page(): void
@@ -2263,7 +2507,7 @@ function topic_edit_page(): void
         if (!can_manage_topic($t)) err('无权限');
     }
     if (is_post_request()) go(route_url('topic', ['id' => save_topic()]));
-    $title = $editing ? '编辑主题' : '发表主题';
+    $title = t($editing ? '编辑主题' : '发表主题');
     $edit_ops = null;
     if ($editing && can_manage()) {
         $edit_ops = [
@@ -2277,7 +2521,7 @@ function topic_edit_page(): void
         't' => $t,
         'editing' => $editing,
         'edit_ops' => $edit_ops,
-        'loading_text' => $editing ? '正在保存' : '正在发帖',
+        'loading_text' => t($editing ? '正在保存' : '正在发帖'),
     ], $title);
 }
 function reply_edit_page(): void
@@ -2333,7 +2577,7 @@ function reply_edit_page(): void
 function admin_tabs(): array
 {
     $items = [];
-    foreach (['settings' => '设置', 'verify' => '站点验证', 'analytics' => '统计', 'tdk' => 'SEO TDK', 'forums' => '版块', 'groups' => '用户组', 'topics' => '帖子管理', 'users' => '用户管理', 'report' => '数据报表', 'mcp' => 'MCP日志'] as $key => $label) {
+    foreach (['settings' => '设置', 'verify' => '站点验证', 'analytics' => '统计', 'tdk' => 'SEO TDK', 'i18n' => '多语言', 'forums' => '版块', 'groups' => '用户组', 'topics' => '帖子管理', 'users' => '用户管理', 'report' => '数据报表', 'mcp' => 'MCP日志'] as $key => $label) {
         $items[$key] = ['label' => $label, 'href' => admin_url(['tab' => $key])];
     }
     return $items;
@@ -2403,11 +2647,38 @@ function sitemap_w3c(int $ts): string
 }
 
 /** sitemap 的 <url> 条目：lastmod 小于等于 0 时省略（协议允许省略） */
-function sitemap_url_xml(string $loc, int $lastmod = 0): string
+function sitemap_url_xml(string $loc, int $lastmod = 0, array $alternates = []): string
 {
     $lines = ['    <loc>' . h($loc) . '</loc>'];
+    foreach ($alternates as $hreflang => $alt_url) {
+        $lines[] = '    <xhtml:link rel="alternate" hreflang="' . h($hreflang) . '" href="' . h($alt_url) . '"/>';
+    }
     if ($lastmod > 0) $lines[] = '    <lastmod>' . sitemap_w3c($lastmod) . '</lastmod>';
     return "  <url>\n" . implode("\n", $lines) . "\n  </url>";
+}
+
+/** 同一页面的全语言地址表：键为 hreflang 值（zh-CN / 语言码 / x-default），值均为绝对地址 */
+function sitemap_lang_map(string $route, array $params): array
+{
+    $langs = enabled_langs();
+    $map = ['zh-CN' => absolute_url(route_url($route, $params, DEFAULT_LANG))];
+    foreach ($langs as $lang) $map[$lang] = absolute_url(route_url($route, $params, $lang));
+    $map['x-default'] = $map[$langs[0] ?? DEFAULT_LANG];
+    return $map;
+}
+
+/** 多语言下的 sitemap 条目：每种语言一个 <url>，各带全语言互补标注；多语言关闭时退化为单条 */
+function sitemap_page_url_langs(string $route, array $params = [], int $lastmod = 0): array
+{
+    $langs = enabled_langs();
+    if (!$langs) return [sitemap_url_xml(absolute_url(route_url($route, $params)), $lastmod)];
+    $map = sitemap_lang_map($route, $params);
+    $urls = [];
+    foreach ($map as $hreflang => $url) {
+        if ($hreflang === 'x-default') continue;
+        $urls[] = sitemap_url_xml($url, $lastmod, $map);
+    }
+    return $urls;
 }
 
 /** 主题的 <lastmod>：回帖会刷新 last_reply_at，取两者较大值兜底（旧数据可能为 0） */
@@ -2429,20 +2700,20 @@ function sitemap_xml_response(string $xml): never
  * 页数同样受最大分页数约束——超出上限的页码会被前台钳到最后一页，生成链接只会产出重复内容 */
 function sitemap_page_urls(): array
 {
-    $urls = [sitemap_url_xml(absolute_url(app_url()))];
+    $urls = sitemap_page_url_langs('home');
     $size = max(1, (int)setting('topics_per_page', '30'));
     $max_pages = max_pagination_pages();
     // 首页列表的第 1 页就是站点根，分页链接从第 2 页开始
     $home_pages = min($max_pages, (int)ceil(Topic::count() / $size));
-    for ($p = 2; $p <= $home_pages; $p++) $urls[] = sitemap_url_xml(absolute_url(route_url('home', ['p' => $p])));
+    for ($p = 2; $p <= $home_pages; $p++) $urls = array_merge($urls, sitemap_page_url_langs('home', ['p' => $p]));
     foreach (sitemap_viewable_forums() as $f) {
         $fid = (int)$f['id'];
         $lastmod = (int)Topic::where('forum_id', $fid)->max('last_reply_at');
-        $urls[] = sitemap_url_xml(absolute_url(route_url('forum', ['id' => $fid])), $lastmod);
+        $urls = array_merge($urls, sitemap_page_url_langs('forum', ['id' => $fid], $lastmod));
         // 与列表页同口径：一级版块聚合可见子分类的主题后再切页
         $total = Topic::whereIn('forum_id', array_merge([$fid], forum_child_ids($fid, true)))->count();
         $pages = min($max_pages, (int)ceil($total / $size));
-        for ($p = 2; $p <= $pages; $p++) $urls[] = sitemap_url_xml(absolute_url(route_url('forum', ['id' => $fid, 'p' => $p])), $lastmod);
+        for ($p = 2; $p <= $pages; $p++) $urls = array_merge($urls, sitemap_page_url_langs('forum', ['id' => $fid, 'p' => $p], $lastmod));
     }
     return $urls;
 }
@@ -2457,11 +2728,11 @@ function sitemap_root_route(): void
     if ($forum_ids && $remaining > 0) {
         $rows = Topic::whereIn('forum_id', $forum_ids)->orderBy('id')->limit($remaining)->get(['id', 'created_at', 'last_reply_at']);
         foreach ($rows as $t) {
-            $urls[] = sitemap_url_xml(absolute_url(route_url('topic', ['id' => (int)$t->id])), sitemap_topic_lastmod($t->toArray()));
+            $urls = array_merge($urls, sitemap_page_url_langs('topic', ['id' => (int)$t->id], sitemap_topic_lastmod($t->toArray())));
         }
     }
     sitemap_xml_response('<?xml version="1.0" encoding="UTF-8"?>' . "\n"
-        . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n"
+        . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">' . "\n"
         . implode("\n", $urls) . "\n</urlset>\n");
 }
 
@@ -2470,7 +2741,7 @@ function sitemap_pages_route(): void
 {
     $urls = sitemap_page_urls();
     sitemap_xml_response('<?xml version="1.0" encoding="UTF-8"?>' . "\n"
-        . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n"
+        . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">' . "\n"
         . implode("\n", $urls) . "\n</urlset>\n");
 }
 
@@ -2485,10 +2756,10 @@ function sitemap_topics_route(int $page): void
         ->get(['id', 'created_at', 'last_reply_at']);
     $urls = [];
     foreach ($rows as $t) {
-        $urls[] = sitemap_url_xml(absolute_url(route_url('topic', ['id' => (int)$t->id])), sitemap_topic_lastmod($t->toArray()));
+        $urls = array_merge($urls, sitemap_page_url_langs('topic', ['id' => (int)$t->id], sitemap_topic_lastmod($t->toArray())));
     }
     sitemap_xml_response('<?xml version="1.0" encoding="UTF-8"?>' . "\n"
-        . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n"
+        . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">' . "\n"
         . ($urls ? implode("\n", $urls) . "\n" : '') . '</urlset>' . "\n");
 }
 
@@ -2497,7 +2768,7 @@ function robots_txt_route(): void
 {
     $lines = ['User-agent: *'];
     // 路径形如 /{a}/{id}，首段即路由名；个人资料页是登录后的设置页，与后台一并禁抓
-    foreach (['admin', 'login', 'logout', 'register', 'profile', 'form_error', 'preview', 'mobile_menu', 'delete', 'topic_edit', 'reply_edit', 'mcp', 'search'] as $a) {
+    foreach (['admin', 'login', 'logout', 'register', 'profile', 'form_error', 'preview', 'mobile_menu', 'delete', 'topic_edit', 'reply_edit', 'mcp', 'search', 'lang'] as $a) {
         $lines[] = 'Disallow: /' . $a;
     }
     $lines[] = 'Disallow: /app/';
@@ -2531,17 +2802,17 @@ function llms_txt_route(): void
     $site_name = trim((string)$settings['site_name']) ?: 'FORUM';
     $description = trim((string)($settings['site_description'] ?? ''));
     if ($description === '') $description = default_site_description();
-    $lines = ['# ' . $site_name, '', '> ' . $description, '', '## 版块'];
+    $lines = ['# ' . $site_name, '', '> ' . t($description), '', t('## 版块')];
     foreach (sitemap_viewable_forums() as $f) {
         $intro = cut(seo_text((string)($f['description'] ?? '')), 80);
-        $lines[] = '- [' . $f['name'] . '](' . absolute_url(route_url('forum', ['id' => (int)$f['id']])) . ')：' . ($intro !== '' ? $intro : '该版块的最新主题与讨论');
+        $lines[] = '- [' . $f['name'] . '](' . absolute_url(route_url('forum', ['id' => (int)$f['id']])) . ')' . t('：') . ($intro !== '' ? $intro : t('该版块的最新主题与讨论'));
     }
     $lines[] = '';
-    $lines[] = '## 使用说明';
-    $lines[] = '- 主题页 URL 形如 ' . absolute_url(route_url('topic', ['id' => 1])) . '（替换数字 id）';
-    $lines[] = '- 行情类主题包含当日价格数据（元/kg），引用时请注明发布日期';
-    $lines[] = '- 全站内容为服务端渲染，无需执行 JavaScript 即可读取';
-    $lines[] = '- 最新内容订阅源（RSS 2.0）：' . absolute_url(app_url('feed.xml'));
+    $lines[] = t('## 使用说明');
+    $lines[] = '- ' . t('主题页 URL 形如 ') . absolute_url(route_url('topic', ['id' => 1])) . t('（替换数字 id）');
+    $lines[] = t('- 行情类主题包含当日价格数据（元/kg），引用时请注明发布日期');
+    $lines[] = t('- 全站内容为服务端渲染，无需执行 JavaScript 即可读取');
+    $lines[] = t('- 最新内容订阅源（RSS 2.0）：') . absolute_url(route_url('feed.xml'));
     header('Content-Type: text/plain; charset=UTF-8');
     header('Cache-Control: public, max-age=3600');
     echo implode("\n", $lines) . "\n";
@@ -2552,7 +2823,7 @@ function feed_route(): void
 {
     $settings = settings_cache();
     $site_name = trim((string)$settings['site_name']) ?: 'FORUM';
-    $site_desc = trim((string)($settings['site_description'] ?? '')) ?: default_site_description();
+    $site_desc = trim(t((string)($settings['site_description'] ?? ''))) ?: default_site_description();
     $viewable = sitemap_viewable_forums();
     $forum_ids = array_map(static fn(array $f): int => (int)$f['id'], $viewable);
     $forum_names = array_column($viewable, 'name', 'id');
@@ -2562,10 +2833,15 @@ function feed_route(): void
     if ($forum_ids) {
         $rows = Topic::whereIn('forum_id', $forum_ids)->orderByDesc('created_at')->orderByDesc('id')
             ->limit($size)->get(['id', 'title', 'body', 'created_at', 'forum_id']);
+        $t_map = current_lang() !== DEFAULT_LANG ? Translator::topic_titles(current_lang(), array_map(static fn($row) => (int)$row['id'], $rows->toArray())) : [];
         foreach ($rows as $t) {
             $fid = (int)$t->forum_id;
             $title = (string)$t->title;
             $excerpt = seo_text((string)$t->body, 200);
+            // 非默认语言：标题与摘要优先用译文（无译文回落中文原文）
+            $translated = (array)($t_map[(int)$t->id] ?? []);
+            if (trim((string)($translated['title'] ?? '')) !== '') $title = (string)$translated['title'];
+            if (trim((string)($translated['description'] ?? '')) !== '') $excerpt = (string)$translated['description'];
             // 收费版块与前台列表同口径：公开出口的标题与摘要一律打码
             if (forum_paid_mode($fid)) {
                 $title = mask_contacts($title);
@@ -2588,9 +2864,9 @@ function feed_route(): void
         . '<rss version="2.0">' . "\n"
         . "  <channel>\n"
         . '    <title>' . h($site_name) . "</title>\n"
-        . '    <link>' . h(absolute_url(app_url())) . "</link>\n"
+        . '    <link>' . h(absolute_url(route_url('home'))) . "</link>\n"
         . '    <description>' . h($site_desc) . "</description>\n"
-        . "    <language>zh-cn</language>\n"
+        . '    <language>' . (current_lang() === DEFAULT_LANG ? 'zh-cn' : current_lang()) . "</language>\n"
         . ($last_build > 0 ? '    <lastBuildDate>' . gmdate('r', $last_build) . "</lastBuildDate>\n" : '')
         . rtrim($items, "\n") . "\n"
         . "  </channel>\n"
@@ -2604,6 +2880,7 @@ function core_routes(): array
 {
     return [
         'home' => 'home_page',
+        'lang' => 'lang_switch_route',
         'search' => [Search::class, 'page'],
         'sitemap.xml' => 'sitemap_root_route',
         'sitemap-pages.xml' => 'sitemap_pages_route',
@@ -2633,6 +2910,7 @@ parse_path_route();
 Database::boot();
 if (!db_schema_ready()) Bootstrap::run();
 ensure_schema_bumps();
+i18n_init();
 check();
 need_site_access();
 // canonical_host_redirect() 保持停用：http→https 与 apex→www 的 301 已上移到宿主 nginx
@@ -2643,6 +2921,7 @@ try {
         err(($_GET['__route_not_found_kind'] ?? '') === 'topic' ? '你访问的帖子可能已经删除' : '你访问的页面不存在', 404);
     }
     $route = (string)($_GET['a'] ?? 'home');
+    i18n_redirect_guard($route);
     $handler = core_routes()[$route] ?? null;
     if ($handler !== null) $handler();
     // 主题分片文件名带序号（/sitemap-topics-2.xml），无法静态注册进 core_routes()
@@ -2663,3 +2942,35 @@ try {
 }
 // 响应已交付：流量触发的 TDK 队列批处理（限频 + 租约互斥，见 tdk_cron_tick / TopicTDK::process_batch）
 tdk_cron_tick();
+i18n_cron_tick();
+i18n_view_tick();
+/** 流量触发的翻译队列批处理：与 TDK 队列同一套限频 + fastcgi_finish_request 模式 */
+function i18n_cron_tick(): void
+{
+    if (PHP_SAPI === 'cli' || !Translator::enabled()) return;
+    $interval = max(30, (int)setting('i18n_interval_seconds', '120'));
+    if (now() - (int)setting('i18n_last_run', '0') < $interval) return;
+    save_settings_values(['i18n_last_run' => (string)now()]);
+    if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+    try {
+        Translator::process_batch();
+    } catch (Throwable $e) {
+        debug_log_write('翻译队列批处理失败', $e);
+    }
+}
+/** 详情页英文访客首访缺译文：响应后立即补翻当前页（限流 15 秒，撞车交给队列 tick） */
+function i18n_view_tick(): void
+{
+    $topic_id = (int)($GLOBALS['__i18n_pending_topic'] ?? 0);
+    $lang = (string)($GLOBALS['__i18n_pending_lang'] ?? '');
+    if ($topic_id <= 0 || $lang === '' || PHP_SAPI === 'cli' || !Translator::enabled()) return;
+    if (now() - (int)setting('i18n_view_run_at', '0') < 15) return;
+    save_settings_values(['i18n_view_run_at' => (string)now()]);
+    if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+    try {
+        Translator::translate_topic($lang, $topic_id);
+    } catch (Throwable $e) {
+        debug_log_write('单篇即时翻译失败', $e);
+    }
+}
+i18n_cron_tick();

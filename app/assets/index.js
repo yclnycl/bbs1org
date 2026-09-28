@@ -705,10 +705,12 @@ if (document.readyState === "loading") document.addEventListener("DOMContentLoad
 else initInfiniteScroll();
 
 // 被打码的联系方式(******)改为可点击:弹窗引导微信扫码或长按识别添加好友
-const contactQrUrl = document.body instanceof HTMLElement ? document.body.dataset.contactQr || "" : "";
+const bodyData = document.body instanceof HTMLElement ? document.body.dataset : {};
+const contactQrUrl = bodyData.contactQr || "";
+// 弹窗文案由服务端按当前语言渲染进 body data 属性，前端不再硬编码中文
 const openContactQrModal = () => {
-    openModal("添加微信", '<img class="contact-qr" src="' + contactQrUrl + '" alt="微信二维码">'
-        + '<p class="contact-qr-hint">联系方式已隐藏。打开微信「扫一扫」扫描二维码，或在手机上长按识别二维码添加好友。</p>');
+    openModal(bodyData.contactQrTitle || "添加微信", '<img class="contact-qr" src="' + contactQrUrl + '" alt="' + (bodyData.contactQrAlt || "微信二维码") + '">'
+        + '<p class="contact-qr-hint">' + (bodyData.contactQrHint || "联系方式已隐藏。打开微信「扫一扫」扫描二维码，或在手机上长按识别二维码添加好友。") + '</p>');
 };
 const wrapMaskedContacts = root => {
     if (!contactQrUrl || !root) return;
@@ -728,15 +730,24 @@ const wrapMaskedContacts = root => {
                 const button = document.createElement("button");
                 button.type = "button";
                 button.className = "contact-masked";
-                button.title = "联系方式已隐藏，点击查看添加方式";
-                button.setAttribute("aria-label", "联系方式已隐藏，点击查看添加方式");
-                button.innerHTML = '******<span class="contact-masked-go">点击查看</span>';
+                button.title = bodyData.contactQrAria || "联系方式已隐藏，点击查看添加方式";
+                button.setAttribute("aria-label", bodyData.contactQrAria || "联系方式已隐藏，点击查看添加方式");
+                button.innerHTML = '******<span class="contact-masked-go">' + (bodyData.contactQrMore || "点击查看") + '</span>';
                 frag.append(button);
             }
         });
         node.replaceWith(frag);
     });
 };
+const langBanner = document.getElementById("lang-banner");
+if (langBanner) {
+    langBanner.addEventListener("click", e => {
+        if (!e.target.closest("[data-lang-banner-close]")) return;
+        const htmlLang = (document.documentElement.lang || "zh").slice(0, 2).toLowerCase();
+        document.cookie = "bbs_lang=" + htmlLang + "; max-age=31536000; path=/; samesite=lax";
+        langBanner.remove();
+    });
+}
 if (contactQrUrl) {
     wrapMaskedContacts(document.getElementById("main"));
     // 无限滚动等动态插入的列表行同样要包装

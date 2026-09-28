@@ -6,13 +6,13 @@
         <div class="forum-main"><div class="main-panel">
             {{ ui.tabs(auth_tabs, 'login', 'auth-tabs') }}
             <div class="form-panel auth-panel">
-                <h2>登录</h2>
+                <h2>{{ '登录'|t }}</h2>
                 <form method="post">
                     {{ f.token() }}
-                    {{ f.input('用户名', 'username', '', 'text', true) }}
-                    {{ f.input('密码', 'password', '', 'password', true) }}
+                    {{ f.input('用户名'|t, 'username', '', 'text', true) }}
+                    {{ f.input('密码'|t, 'password', '', 'password', true) }}
                     {{ f.turnstile('login') }}
-                    <button>登录</button>
+                    <button>{{ '登录'|t }}</button>
                 </form>
             </div>
         </div></div>

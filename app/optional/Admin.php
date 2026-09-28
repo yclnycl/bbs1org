@@ -200,6 +200,48 @@ final class Admin
         go(admin_url(['tab' => 'analytics']));
     }
 
+    /** 多语言 tab：启用语言与翻译队列设置；翻译由页面访问触发，详情页英文首访缺译文时即时补翻 */
+    public static function i18n_fields(): array
+    {
+        return [
+            'i18n_enabled_langs' => ['label' => '启用的语言', 'help' => '逗号分隔的两位语言码（如 en,fr），作为 /语言/ 子目录站点；中文始终保留在无前缀的主站。留空=关闭多语言，全站恢复纯中文且不再做语言跳转。'],
+            'i18n_batch_size' => ['label' => '每批篇数', 'type' => 'number', 'min' => 1, 'max' => 20],
+            'i18n_interval_seconds' => ['label' => '自动触发间隔（秒）', 'type' => 'number', 'min' => 30, 'max' => 86400, 'help' => '页面访问按该间隔自动推进翻译队列；英文访客首访缺译文的帖子会即时补翻，不受此间隔限制。'],
+            'i18n_timeout' => ['label' => '接口超时（秒）', 'type' => 'number', 'min' => 10, 'max' => 300],
+        ];
+    }
+
+    public static function i18n_view(): array
+    {
+        $per_lang = [];
+        foreach (enabled_langs() as $lang) {
+            $per_lang[$lang] = ['stats' => Translator::stats($lang), 'logs' => Translator::recent_logs($lang, 10)];
+        }
+        return ['fields' => self::i18n_fields(), 'settings' => settings_cache(), 'per_lang' => $per_lang, 'api_key_set' => Translator::api_key() !== ''];
+    }
+
+    public static function i18n_handle_post(): never
+    {
+        if ((string)($_POST['action'] ?? '') === 'run_batch') {
+            $result = Translator::process_batch((int)($_POST['batch'] ?? 0));
+            if ((int)$result['skipped'] === 1) set_flash('另一个翻译进程正在运行，请稍后再试');
+            else set_flash('本批完成 ' . (int)$result['done'] . ' 篇' . ((int)$result['failed'] > 0 ? '，失败 ' . (int)$result['failed'] . ' 篇（将自动重试）' : ''));
+            go(admin_url(['tab' => 'i18n']));
+        }
+        $values = [];
+        foreach (['i18n_batch_size', 'i18n_interval_seconds', 'i18n_timeout'] as $key) $values[$key] = (string)max(1, (int)($_POST[$key] ?? 0));
+        // 语言码白名单化：只留两位字母码且不允许 zh（默认语言不带前缀）
+        $langs = [];
+        foreach (explode(',', post('i18n_enabled_langs', 100)) as $code) {
+            $code = strtolower(trim($code));
+            if (preg_match('/^[a-z]{2}$/', $code) && $code !== DEFAULT_LANG) $langs[] = $code;
+        }
+        $values['i18n_enabled_langs'] = implode(',', array_unique($langs));
+        save_settings_values($values);
+        set_flash('多语言设置已保存');
+        go(admin_url(['tab' => 'i18n']));
+    }
+
     /** SEO TDK tab 的字段白名单：数值字段统一 [下限, 上限] 校验 */
     private static function tdk_number_fields(): array
     {
@@ -272,19 +314,20 @@ final class Admin
         if ($tab === 'settings' && is_post_request()) self::settings_handle_post();
         if ($tab === 'verify' && is_post_request()) self::verify_handle_post();
         if ($tab === 'analytics' && is_post_request()) self::analytics_handle_post();
+        if ($tab === 'i18n' && is_post_request()) self::i18n_handle_post();
         if ($tab === 'tdk' && is_post_request()) self::tdk_handle_post();
         if ($tab === 'topics' && is_post_request()) self::topics_handle_post();
         if ($tab === 'users' && is_post_request()) self::users_handle_post();
         if ($tab === 'mcp' && is_post_request()) self::mcp_handle_post();
         $template = match ($tab) {
-            'settings' => 'admin/settings.html.twig', 'verify' => 'admin/verify.html.twig', 'analytics' => 'admin/analytics.html.twig', 'groups' => 'admin/groups.html.twig', 'forums' => 'admin/forums.html.twig',
+            'settings' => 'admin/settings.html.twig', 'verify' => 'admin/verify.html.twig', 'analytics' => 'admin/analytics.html.twig', 'i18n' => 'admin/i18n.html.twig', 'groups' => 'admin/groups.html.twig', 'forums' => 'admin/forums.html.twig',
             'topics' => 'admin/topics.html.twig', 'users' => 'admin/users.html.twig', 'report' => 'admin/report.html.twig',
             'mcp' => 'admin/mcp.html.twig', 'tdk' => 'admin/tdk.html.twig',
             default => '',
         };
         if ($template === '') err('你访问的页面不存在', 404);
         $view = match ($tab) {
-            'settings' => self::settings_html(), 'verify' => self::verify_view(), 'analytics' => self::analytics_view(), 'groups' => self::groups_view(), 'forums' => self::forums_view(),
+            'settings' => self::settings_html(), 'verify' => self::verify_view(), 'analytics' => self::analytics_view(), 'i18n' => self::i18n_view(), 'groups' => self::groups_view(), 'forums' => self::forums_view(),
             'topics' => self::topics_view(), 'users' => self::users_view(), 'report' => self::report_view(),
             'mcp' => self::mcp_view(), 'tdk' => self::tdk_view(),
             default => [],

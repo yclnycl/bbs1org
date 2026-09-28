@@ -1,5 +1,6 @@
 app/*
 !app/assets/
+!app/i18n/
 !app/optional/
 !app/version.php
 /vendor/

@@ -1,0 +1,56 @@
+{% extends 'admin/layout.html.twig' %}
+{% import 'macros/form.html.twig' as f %}
+{% block admin_body %}
+    <div class="form-panel settings-form">
+        <h2>翻译进度</h2>
+        {% if not per_lang %}
+            <p>多语言未启用：在下方「启用的语言」填入语言码（如 en）并保存后，将生成 /语言/ 子目录站点并开始翻译队列。</p>
+        {% endif %}
+        {% for lang, item in per_lang %}
+            {% set stats = item.stats %}
+            <p><strong>{{ lang|upper }}</strong>（/{{ lang }}/）：主题总数 <strong>{{ stats.total }}</strong>，已翻译 <strong>{{ stats.translated }}</strong>，待翻译 <strong>{{ stats.pending }}</strong>{% if stats.failed > 0 %}，失败挂起 <strong>{{ stats.failed }}</strong>{% endif %}。</p>
+        {% endfor %}
+        <p>翻译方式：DeepSeek 接口（复用 SEO TDK 的模型与密钥配置）{% if not api_key_set %}<strong>——未配置 DEEPSEEK_API_KEY，翻译不可用</strong>{% endif %}；队列按主题 id 降序处理（新帖优先），页面访问自动推进，英文访客首访缺译文的帖子会即时补翻，也可在下方手动处理。</p>
+        <form method="post">
+            {{ f.token() }}
+            <input type="hidden" name="action" value="run_batch">
+            <div class="row settings-actions"><button type="submit">立即翻译一批</button></div>
+        </form>
+    </div>
+    {% for lang, item in per_lang %}
+        <div class="form-panel settings-form">
+            <h2>{{ lang|upper }} 队列日志（最近 {{ item.logs|length }} 条）</h2>
+            {% if item.logs %}
+                <table class="list admin-bulk-list">
+                    <tr><th>时间</th><th>对象</th><th>耗时</th><th>状态</th></tr>
+                    {% for row in item.logs %}
+                        <tr>
+                            <td>{{ row.updated_at|date('m-d H:i') }}</td>
+                            <td>
+                                {% if row.target_type == 'forum' %}<span>版块 #{{ row.target_id }}</span>
+                                {% else %}<a href="{{ route_url('topic', {id: row.target_id}) }}">{{ row.topic_title != '' ? row.topic_title|slice(0, 40) : '（无标题 #' ~ row.target_id ~ '）' }}</a>{% endif %}
+                                {% if row.status == 'failed' and row.last_error != '' %}<br><small>{{ row.last_error }}</small>{% endif %}
+                            </td>
+                            <td>{{ row.duration_ms > 0 ? (row.duration_ms / 1000)|round(1) ~ 's' : '—' }}</td>
+                            <td>
+                                {% if row.status == 'failed' %}
+                                    {% if row.attempts >= 5 %}已放弃{% else %}失败待重试（第 {{ row.attempts }} 次）{% endif %}
+                                {% else %}成功{% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </table>
+            {% else %}
+                <p class="empty-state">还没有翻译记录——点击上方「立即翻译一批」或等待页面访问自动触发。</p>
+            {% endif %}
+        </div>
+    {% endfor %}
+    <div class="form-panel settings-form">
+        <h2>多语言设置</h2>
+        <form method="post">
+            {{ f.token() }}
+            {{ f.render_fields(fields, settings) }}
+            <div class="row settings-actions"><button type="submit">保存</button></div>
+        </form>
+    </div>
+{% endblock %}

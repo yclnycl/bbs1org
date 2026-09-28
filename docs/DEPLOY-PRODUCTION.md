@@ -107,7 +107,7 @@ cd bbs1org/docker
 | 2 | 备份：`VACUUM INTO` 快照线上库到 `backups/db-<时间戳>.sqlite`；`cp -a` 现有 `bbs1org_docker` 到 `backups/<时间戳>/` |
 | 3 | 上传：`tar` 打包工作树（含 `vendor/`，服务器不必联外网）解到 `releases/<时间戳>/` |
 | 4 | 同步配置：`docker-compose.yml`、`nginx.conf`、`opcache.ini` 覆盖到 `bbs1org_docker/`；`.env` 的 `BBS1ORG_PATH` 指向新版本 |
-| 5 | 重建：`docker compose up -d --remove-orphans --force-recreate`（顺带清 opcache、清掉旧版 cron 容器） |
+| 5 | 重建：`docker compose up -d --remove-orphans --force-recreate`（顺带清 opcache、清掉旧版 cron 容器），随后 `docker compose restart php` 兜底清一次 OPcache |
 | 6 | 健康检查：首页/登录页/静态资源 200，`/app/data`、`/vendor`、`/templates` 403 |
 
 发布后人工确认：

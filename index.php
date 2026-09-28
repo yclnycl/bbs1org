@@ -209,6 +209,7 @@ function default_settings(): array
         'reply_body_min_length' => '1', 'reply_body_max_length' => (string)DB_TEXT_MAX_LENGTH,
         'excerpt_length' => '200',
         'post_interval_seconds' => '5',
+        'baidu_verification' => 'codeva-o0vee5lpeB',
     ];
 }
 function settings_cache(): array
@@ -849,12 +850,50 @@ function cut(string $v, int $max): string
 function human_time(int $ts): string
 {
     $diff = time() - $ts;
-    if ($diff < 60) return '刚刚';
-    if ($diff < 3600) return floor($diff / 60) . '分钟前';
-    if ($diff < 86400) return floor($diff / 3600) . '小时前';
-    if ($diff < 172800) return '昨天';
-    if ($diff < 604800) return floor($diff / 86400) . '天前';
-    return date('Y-m-d', $ts);
+    if ($diff < 60) $text = '刚刚';
+    elseif ($diff < 3600) $text = floor($diff / 60) . '分钟前';
+    elseif ($diff < 86400) $text = floor($diff / 3600) . '小时前';
+    elseif ($diff < 172800) $text = '昨天';
+    elseif ($diff < 604800) $text = floor($diff / 86400) . '天前';
+    else $text = date('Y-m-d', $ts);
+    // 包一层 <time datetime>：搜索引擎与 AI 引擎靠机器可读时间戳判定内容新鲜度
+    return '<time datetime="' . sitemap_w3c($ts) . '">' . $text . '</time>';
+}
+/** SEO：站点默认一句话介绍——后台 site_description 留空时兜底 */
+function default_site_description(): string
+{
+    return '旧衣回收、出口行情与政策法规的行业资讯与交流社区。';
+}
+/** SEO：首页 <title> 的业务词后缀 */
+function home_title_suffix(): string
+{
+    return '旧衣回收与出口行业资讯';
+}
+/** SEO：JSON-LD 输出编码——HEX_TAG 防止标题正文里的 `</script>` 提前闭合标签 */
+function seo_jsonld_script(array $objects): string
+{
+    if (!$objects) return '';
+    $json = json_encode(array_values($objects), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+        | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    return $json === false ? '' : '<script type="application/ld+json">' . $json . '</script>';
+}
+/** SEO：规范化主机名——site_base_url 已配置时，主机名不符的 GET 请求 301 到规范域（本地开发未配置则不生效） */
+function canonical_host_redirect(): void
+{
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') return;
+    $base = clean_site_base_url(setting('site_base_url', ''));
+    $configured_host = strtolower((string)parse_url($base, PHP_URL_HOST));
+    $request_host = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+    if ($base === '' || $configured_host === '' || $request_host === '') return;
+    $request_host = strtolower((string)(parse_url('http://' . $request_host, PHP_URL_HOST) ?: $request_host));
+    if ($request_host === $configured_host) return;
+    // 开发库常带线上 site_base_url：本机、内网与 IP 直连一律不跳转，避免破坏本地工作流
+    $local = static fn(string $host): bool => filter_var($host, FILTER_VALIDATE_IP) !== false
+        || $host === 'localhost' || str_ends_with($host, '.localhost');
+    if ($local($request_host) || $local($configured_host)) return;
+    if (($_GET['a'] ?? '') === 'mcp') return;
+    header('Location: ' . rtrim($base, '/') . (string)($_SERVER['REQUEST_URI'] ?? '/'), true, 301);
+    exit;
 }
 function max_pagination_pages(): int
 {
@@ -1119,10 +1158,37 @@ function page_common_data(string $title, array $seo = []): array
     $site_name = trim((string)$settings['site_name']) ?: 'FORUM';
     $site_name_title = trim((string)($settings['site_name_title'] ?? '')) ?: $site_name;
     $is_home = ($_GET['a'] ?? 'home') === 'home' && trim((string)($_GET['q'] ?? '')) === '';
-    $page_title = $is_home || $title === '' || $title === $site_name ? $site_name_title : $title . ' - ' . $site_name_title;
+    $page_title = $is_home || $title === '' || $title === $site_name
+        ? trim($site_name_title . ($is_home && home_title_suffix() !== '' ? ' - ' . home_title_suffix() : ''))
+        : $title . ' - ' . $site_name_title;
     $description = trim((string)($seo['description'] ?? ($settings['site_description'] ?? '')));
     $flash = trim((string)($_COOKIE['__flash'] ?? ''));
     if ($flash !== '' && !headers_sent()) app_cookie('__flash', '', time() - 3600, true, false);
+    // 全站结构化数据：Organization 每页都有，WebSite（含搜索动作）走 @id 引用
+    $base = rtrim(base_url(), '/');
+    $jsonld = [[
+        '@context' => 'https://schema.org',
+        '@type' => 'Organization',
+        '@id' => $base . '/#organization',
+        'name' => $site_name,
+        'url' => $base . '/',
+        'logo' => absolute_url(asset_url('app/assets/index.svg')),
+    ]];
+    $jsonld[] = [
+        '@context' => 'https://schema.org',
+        '@type' => 'WebSite',
+        '@id' => $base . '/#website',
+        'name' => $site_name_title,
+        'url' => $base . '/',
+        'inLanguage' => 'zh-CN',
+        'publisher' => ['@id' => $base . '/#organization'],
+        'potentialAction' => [
+            '@type' => 'SearchAction',
+            'target' => ['@type' => 'EntryPoint', 'urlTemplate' => absolute_url(app_url('search')) . '?q={q}'],
+            'query-input' => 'required name=q',
+        ],
+    ];
+    foreach ((array)($seo['jsonld'] ?? []) as $object) $jsonld[] = $object;
     return [
         'title' => $title,
         'site_name' => $site_name,
@@ -1130,6 +1196,10 @@ function page_common_data(string $title, array $seo = []): array
         'site_keywords' => (string)($settings['site_keywords'] ?? ''),
         'site_description' => $description,
         'seo_canonical' => (string)($seo['canonical'] ?? ''),
+        'seo_og_type' => (string)($seo['og_type'] ?? 'website'),
+        // og:image 兜底：页面无图时用全站默认横幅，保证社交/AI 预览卡片不为空
+        'seo_image' => trim((string)($seo['image'] ?? '')) !== '' ? (string)$seo['image'] : absolute_url(asset_url('app/assets/og-default.png')) . '?v=' . APP_VERSION,
+        'seo_jsonld' => seo_jsonld_script($jsonld),
         'is_home' => $is_home,
         'page_title' => $page_title,
         'flash' => $flash,
@@ -1743,9 +1813,37 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
     $data = topic_index_data($fid, $filter_user, $profile_tab, $q, $search_field, $sort, $p, $size, $profile_tab_allowed, $profile_tab_notice);
     if ($profile_uid && $profile_tab_allowed && $profile_tab === 'notifications') mark_notifications_read($profile_uid, (int)$data['unread_total']);
     $title = $profile_uid ? $filter_user['username'] : ($filter_forum ? $filter_forum['name'] : '首页');
+    $brand = trim((string)(settings_cache()['site_name_title'] ?? '')) ?: trim((string)(settings_cache()['site_name'] ?? '')) ?: 'FORUM';
+    $page_h1 = $filter_forum ? (string)$filter_forum['name'] : ($profile_uid ? '' : $brand);
     $seo = [];
-    if ($profile_uid) $seo = page_seo('user', ['id' => $profile_uid], (string)($filter_user['bio'] ?? $filter_user['username']));
-    elseif ($filter_forum) $seo = page_seo('forum', ['id' => $fid], (string)($filter_forum['description'] ?? $filter_forum['name']));
+    if ($profile_uid) {
+        $seo = page_seo('user', ['id' => $profile_uid], (string)($filter_user['bio'] ?? $filter_user['username']));
+    } elseif ($filter_forum) {
+        $seo = page_seo('forum', ['id' => $fid], (string)($filter_forum['description'] ?? ''));
+        if (($seo['description'] ?? '') === '') $seo['description'] = '「' . $filter_forum['name'] . '」版块的最新主题与讨论——' . $brand;
+        $forum_url = absolute_url(route_url('forum', ['id' => $fid]));
+        $seo['jsonld'] = [
+            [
+                '@context' => 'https://schema.org',
+                '@type' => 'CollectionPage',
+                '@id' => $forum_url . '#collection',
+                'url' => $forum_url,
+                'name' => (string)$filter_forum['name'],
+                'inLanguage' => 'zh-CN',
+                'isPartOf' => ['@id' => rtrim(base_url(), '/') . '/#website'],
+            ],
+            [
+                '@context' => 'https://schema.org',
+                '@type' => 'BreadcrumbList',
+                'itemListElement' => [
+                    ['@type' => 'ListItem', 'position' => 1, 'name' => '首页', 'item' => rtrim(base_url(), '/') . '/'],
+                    ['@type' => 'ListItem', 'position' => 2, 'name' => (string)$filter_forum['name'], 'item' => $forum_url],
+                ],
+            ],
+        ];
+    } else {
+        $seo = page_seo('home', [], $brand . '：' . default_site_description());
+    }
     $search_query = $q !== '' ? 'q=' . rawurlencode($q) . '&field=' . $search_field . '&' : '';
     $tab_items = ['comment' => ['label' => '新评论', 'href' => $url($search_query . 'sort=comment')], 'post' => ['label' => '新帖子', 'href' => $url($search_query . 'sort=post')]];
     $list_rows = [];
@@ -1778,6 +1876,7 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
         'list_rows' => $list_rows,
         'notification_rows' => $notification_rows,
         'empty_text' => $empty_text,
+        'page_h1' => $page_h1,
         'pagination' => $pagination,
         'sidebar_user' => $profile_uid ? $filter_user : null,
         'shell_class' => $profile_uid ? 'profile-mobile-sidebar' . ($own_profile ? ' profile-mobile-sidebar-own' : '') : ($is_home_first_page ? 'home-mobile-sidebar' : ''),
@@ -1874,7 +1973,51 @@ function topic_page(): void
     $t = $page_data['topic'];
     $replies = apply_reply_floors($page_data['replies'], $t, $p, $size, $reply_desc);
     $view = compact('t', 'forum', 'replies', 'p', 'size', 'off', 'reply_desc', 'replyid', 'floor') + ['topic' => $t, 'page' => $p, 'page_size' => $size, 'offset' => $off, 'reply_order' => $reply_desc ? 1 : 0];
-    render_page('topic.html.twig', topic_page_view($view), $t['title'] . ' - ' . $forum['name'], page_seo('topic', ['id' => (int)$t['id']], (string)$t['body']));
+    $t_seo = page_seo('topic', ['id' => (int)$t['id']], (string)$t['body']);
+    $t_base = rtrim(base_url(), '/');
+    $topic_url = $t_seo['canonical'];
+    // og:image 取正文第一张非 SVG 图片；SVG 不是社交平台支持的预览格式
+    $t_image = '';
+    if (preg_match('/<img[^>]*\ssrc="([^"]+)"/i', (string)$t['body'], $img_m)) {
+        $img_src = html_entity_decode((string)$img_m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        if (!preg_match('/\.svg(?:[?#]|$)/i', $img_src)) $t_image = absolute_url($img_src);
+    }
+    $t_seo['jsonld'] = [
+        [
+            '@context' => 'https://schema.org',
+            '@type' => 'DiscussionForumPosting',
+            '@id' => $topic_url . '#posting',
+            'url' => $topic_url,
+            'headline' => (string)$t['title'],
+            'datePublished' => sitemap_w3c((int)$t['created_at']),
+            'dateModified' => sitemap_w3c(max((int)$t['created_at'], (int)($t['last_reply_at'] ?: 0))),
+            'author' => [
+                '@type' => 'Person',
+                'name' => (string)($t['username'] ?? ''),
+                'url' => absolute_url(route_url('user', ['id' => (int)$t['user_id']])),
+            ],
+            'interactionStatistic' => [
+                ['@type' => 'InteractionCounter', 'interactionType' => 'https://schema.org/ViewAction', 'userInteractionCount' => (int)$t['view_count']],
+                ['@type' => 'InteractionCounter', 'interactionType' => 'https://schema.org/CommentAction', 'userInteractionCount' => (int)$t['reply_count']],
+            ],
+            'publisher' => ['@id' => $t_base . '/#organization'],
+        ],
+        [
+            '@context' => 'https://schema.org',
+            '@type' => 'BreadcrumbList',
+            'itemListElement' => [
+                ['@type' => 'ListItem', 'position' => 1, 'name' => '首页', 'item' => $t_base . '/'],
+                ['@type' => 'ListItem', 'position' => 2, 'name' => (string)$forum['name'], 'item' => absolute_url(route_url('forum', ['id' => (int)$forum['id']]))],
+                ['@type' => 'ListItem', 'position' => 3, 'name' => (string)$t['title'], 'item' => $topic_url],
+            ],
+        ],
+    ];
+    $t_seo['og_type'] = 'article';
+    if ($t_image !== '') $t_seo['image'] = $t_image;
+    // <title> 里的标题截断到 32 字，保证「标题 - 版块 - 站名」整体在搜索结果展示宽度内
+    $t_title_seo = (string)$t['title'];
+    if (mb_strlen($t_title_seo) > 32) $t_title_seo = cut($t_title_seo, 32) . '…';
+    render_page('topic.html.twig', topic_page_view($view), $t_title_seo . ' - ' . $forum['name'], $t_seo);
 }
 function topic_edit_page(): void
 {
@@ -1959,7 +2102,7 @@ function reply_edit_page(): void
 function admin_tabs(): array
 {
     $items = [];
-    foreach (['settings' => '设置', 'forums' => '版块', 'groups' => '用户组', 'topics' => '帖子管理', 'users' => '用户管理', 'report' => '数据报表', 'mcp' => 'MCP日志'] as $key => $label) {
+    foreach (['settings' => '设置', 'verify' => '站点验证', 'forums' => '版块', 'groups' => '用户组', 'topics' => '帖子管理', 'users' => '用户管理', 'report' => '数据报表', 'mcp' => 'MCP日志'] as $key => $label) {
         $items[$key] = ['label' => $label, 'href' => admin_url(['tab' => $key])];
     }
     return $items;
@@ -2010,6 +2153,8 @@ function preview_route(): void
 }
 /** sitemap 单文件 URL 数量上限：协议上限 5 万条/50MB，按 1 万条切分留足余量 */
 const SITEMAP_TOPICS_PER_FILE = 10000;
+/** sitemap 协议单文件 URL 硬上限：/sitemap.xml 按它截断，装不下的主题仍走分片文件 */
+const SITEMAP_MAX_URLS = 50000;
 
 /** 游客（即爬虫）可见的版块：allow_view_groups 为空表示不限制，否则须显式包含游客组 0 */
 function sitemap_viewable_forums(): array
@@ -2049,32 +2194,39 @@ function sitemap_xml_response(string $xml): never
     exit;
 }
 
-/** /sitemap.xml：sitemapindex，页面清单一张 + 主题清单按上限切分的若干张 */
-function sitemap_index_route(): void
-{
-    $forum_ids = array_map(static fn(array $f): int => (int)$f['id'], sitemap_viewable_forums());
-    $latest = $forum_ids ? (int)Topic::whereIn('forum_id', $forum_ids)->max('last_reply_at') : 0;
-    $maps = ['  <sitemap><loc>' . h(absolute_url(app_url('sitemap-pages.xml'))) . '</loc>'
-        . ($latest > 0 ? '<lastmod>' . sitemap_w3c($latest) . '</lastmod>' : '') . '</sitemap>'];
-    if ($forum_ids) {
-        $files = (int)ceil(Topic::whereIn('forum_id', $forum_ids)->count() / SITEMAP_TOPICS_PER_FILE);
-        for ($i = 1; $i <= $files; $i++) {
-            $maps[] = '  <sitemap><loc>' . h(absolute_url(app_url("sitemap-topics-{$i}.xml"))) . '</loc></sitemap>';
-        }
-    }
-    sitemap_xml_response('<?xml version="1.0" encoding="UTF-8"?>' . "\n"
-        . '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n"
-        . implode("\n", $maps) . "\n</sitemapindex>\n");
-}
-
-/** /sitemap-pages.xml：首页 + 游客可见版块列表页，lastmod 取该版块最新回帖时间 */
-function sitemap_pages_route(): void
+/** 首页 + 游客可见版块列表页的 <url> 条目，lastmod 取该版块最新回帖时间 */
+function sitemap_page_urls(): array
 {
     $urls = [sitemap_url_xml(absolute_url(app_url()))];
     foreach (sitemap_viewable_forums() as $f) {
         $fid = (int)$f['id'];
         $urls[] = sitemap_url_xml(absolute_url(route_url('forum', ['id' => $fid])), (int)Topic::where('forum_id', $fid)->max('last_reply_at'));
     }
+    return $urls;
+}
+
+/** /sitemap.xml：单张平面 urlset（首页+版块页+全部游客可见主题）。头条等国内平台不收索引型 sitemap，百度也不再处理索引型，统一输出平面格式 */
+function sitemap_root_route(): void
+{
+    $urls = sitemap_page_urls();
+    $forum_ids = array_map(static fn(array $f): int => (int)$f['id'], sitemap_viewable_forums());
+    // 协议单文件上限 5 万条：主题按 id 升序填满剩余额度，装不下的仍可经 /sitemap-topics-{n}.xml 单独提交
+    $remaining = SITEMAP_MAX_URLS - count($urls);
+    if ($forum_ids && $remaining > 0) {
+        $rows = Topic::whereIn('forum_id', $forum_ids)->orderBy('id')->limit($remaining)->get(['id', 'created_at', 'last_reply_at']);
+        foreach ($rows as $t) {
+            $urls[] = sitemap_url_xml(absolute_url(route_url('topic', ['id' => (int)$t->id])), sitemap_topic_lastmod($t->toArray()));
+        }
+    }
+    sitemap_xml_response('<?xml version="1.0" encoding="UTF-8"?>' . "\n"
+        . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n"
+        . implode("\n", $urls) . "\n</urlset>\n");
+}
+
+/** /sitemap-pages.xml：首页 + 游客可见版块列表页，lastmod 取该版块最新回帖时间 */
+function sitemap_pages_route(): void
+{
+    $urls = sitemap_page_urls();
     sitemap_xml_response('<?xml version="1.0" encoding="UTF-8"?>' . "\n"
         . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n"
         . implode("\n", $urls) . "\n</urlset>\n");
@@ -2114,14 +2266,46 @@ function robots_txt_route(): void
     echo implode("\n", $lines) . "\n";
     exit;
 }
+/** /seo-indexnow-key.txt：IndexNow 的 key 文件（Bing/Yandex 快速收录通道的归属验证），key 在站点设置 indexnow_key 里 */
+function indexnow_key_route(): void
+{
+    header('Content-Type: text/plain; charset=UTF-8');
+    header('Cache-Control: public, max-age=3600');
+    echo setting('indexnow_key', '') . "\n";
+    exit;
+}
+/** /llms.txt：面向 AI 系统的站点说明（llmstxt.org 社区规范；Google 声明不用于搜索排名，供其他 AI 系统选用） */
+function llms_txt_route(): void
+{
+    $settings = settings_cache();
+    $site_name = trim((string)$settings['site_name']) ?: 'FORUM';
+    $description = trim((string)($settings['site_description'] ?? ''));
+    if ($description === '') $description = default_site_description();
+    $lines = ['# ' . $site_name, '', '> ' . $description, '', '## 版块'];
+    foreach (sitemap_viewable_forums() as $f) {
+        $intro = cut(seo_text((string)($f['description'] ?? '')), 80);
+        $lines[] = '- [' . $f['name'] . '](' . absolute_url(route_url('forum', ['id' => (int)$f['id']])) . ')：' . ($intro !== '' ? $intro : '该版块的最新主题与讨论');
+    }
+    $lines[] = '';
+    $lines[] = '## 使用说明';
+    $lines[] = '- 主题页 URL 形如 ' . absolute_url(route_url('topic', ['id' => 1])) . '（替换数字 id）';
+    $lines[] = '- 行情类主题包含当日价格数据（元/kg），引用时请注明发布日期';
+    $lines[] = '- 全站内容为服务端渲染，无需执行 JavaScript 即可读取';
+    header('Content-Type: text/plain; charset=UTF-8');
+    header('Cache-Control: public, max-age=3600');
+    echo implode("\n", $lines) . "\n";
+    exit;
+}
 function core_routes(): array
 {
     return [
         'home' => 'home_page',
         'search' => [Search::class, 'page'],
-        'sitemap.xml' => 'sitemap_index_route',
+        'sitemap.xml' => 'sitemap_root_route',
         'sitemap-pages.xml' => 'sitemap_pages_route',
         'robots.txt' => 'robots_txt_route',
+        'llms.txt' => 'llms_txt_route',
+        'seo-indexnow-key.txt' => 'indexnow_key_route',
         'mobile_menu' => 'mobile_menu_route',
         'preview' => 'preview_route',
         'forum' => 'forum_page',
@@ -2145,6 +2329,7 @@ Database::boot();
 if (!db_schema_ready()) Bootstrap::run();
 check();
 need_site_access();
+// canonical_host_redirect() 停用：apex 与 www 都要能直接访问，不再 301 到规范域；canonical 等绝对地址仍由 site_base_url 生成
 try {
     if (($_GET['__route_not_found'] ?? '') === '1') {
         err(($_GET['__route_not_found_kind'] ?? '') === 'topic' ? '你访问的帖子可能已经删除' : '你访问的页面不存在', 404);

@@ -6,7 +6,26 @@
     {% if is_home and site_keywords != '' %}<meta name="keywords" content="{{ site_keywords }}">{% endif %}
     {% if site_description != '' %}<meta name="description" content="{{ site_description }}">{% endif %}
     {% if seo_canonical %}<link rel="canonical" href="{{ seo_canonical }}">{% endif %}
+    {% if setting('google_verification') != '' %}<meta name="google-site-verification" content="{{ setting('google_verification') }}">{% endif %}
+    {% if setting('baidu_verification') != '' %}<meta name="baidu-site-verification" content="{{ setting('baidu_verification') }}">{% endif %}
+    {% if setting('bing_verification') != '' %}<meta name="msvalidate.01" content="{{ setting('bing_verification') }}">{% endif %}
+    {% if setting('toutiao_verification') != '' %}<meta name="bytedance-verification-code" content="{{ setting('toutiao_verification') }}">{% endif %}
+    {% if setting('so_verification') != '' %}<meta name="360-site-verification" content="{{ setting('so_verification') }}">{% endif %}
+    {% if setting('sm_verification') != '' %}<meta name="shenma-site-verification" content="{{ setting('sm_verification') }}">{% endif %}
+    {% if setting('sogou_verification') != '' %}<meta name="sogou_site_verification" content="{{ setting('sogou_verification') }}">{% endif %}
     <title>{{ page_title }}</title>
+    <meta property="og:site_name" content="{{ site_name }}">
+    <meta property="og:type" content="{{ seo_og_type }}">
+    <meta property="og:title" content="{{ page_title }}">
+    <meta property="og:url" content="{{ seo_canonical ?: app_url() }}">
+    <meta property="og:locale" content="zh_CN">
+    {% if site_description != '' %}<meta property="og:description" content="{{ site_description }}">{% endif %}
+    {% if seo_image != '' %}<meta property="og:image" content="{{ seo_image }}">{% endif %}
+    <meta name="twitter:card" content="{{ seo_image != '' ? 'summary_large_image' : 'summary' }}">
+    <meta name="twitter:title" content="{{ page_title }}">
+    {% if site_description != '' %}<meta name="twitter:description" content="{{ site_description }}">{% endif %}
+    {% if seo_image != '' %}<meta name="twitter:image" content="{{ seo_image }}">{% endif %}
+    {{ seo_jsonld|raw }}
     <link rel="icon" type="image/svg+xml" href="{{ asset_url('app/assets/index.svg') }}">
     <link rel="stylesheet" href="{{ app_url('app/assets/index.css') }}?v={{ app_version }}">
     {% block head %}{% endblock %}

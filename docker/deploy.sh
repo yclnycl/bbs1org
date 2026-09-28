@@ -220,9 +220,13 @@ compose_up() {
     say "重建容器（配置是 bind mount，必须重建才会读到新文件，同时清掉旧 opcache）"
     if [ "$DRY_RUN" -eq 1 ]; then
         echo "  [dry-run] docker compose up -d --remove-orphans --force-recreate"
+        echo "  [dry-run] docker compose restart php"
         return 0
     fi
     dcx "up -d --remove-orphans --force-recreate"
+    # 上线后兜底清 OPcache：php -r 跑在 CLI 里动不了 fpm 的共享内存，重启 php 容器才是可靠的清法；
+    # 正常路径下 --force-recreate 的新容器 opcache 本就是空的，这一步保证「容器没被重建」时也不跑旧字节码
+    dcx "restart php"
 }
 
 health_check() {

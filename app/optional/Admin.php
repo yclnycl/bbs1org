@@ -135,6 +135,34 @@ final class Admin
         ];
     }
 
+    /** 各搜索引擎站点验证的 meta 标签输出在 templates/layout.html.twig，这里只管后台字段与取值 */
+    public static function verify_fields(): array
+    {
+        return [
+            'baidu_verification' => ['label' => '百度', 'help' => '百度搜索资源平台（ziyuan.baidu.com）HTML 标签验证的 content 值，输出为 baidu-site-verification meta。'],
+            'bing_verification' => ['label' => '必应', 'help' => 'Bing 站长工具（bing.com/webmasters）HTML 标签验证的 content 值，输出为 msvalidate.01 meta。'],
+            'toutiao_verification' => ['label' => '头条/抖音搜索', 'help' => '头条搜索站长平台（zhanzhang.toutiao.com）HTML 标签验证的 content 值，输出为 bytedance-verification-code meta，收录后可进抖音搜索与豆包。'],
+            'so_verification' => ['label' => '360 搜索', 'help' => '360 站长平台（zhanzhang.so.com）HTML 标签验证的 content 值，输出为 360-site-verification meta。'],
+            'sm_verification' => ['label' => '神马（夸克）', 'help' => '神马站长平台（zhanzhang.sm.cn）HTML 标签验证的 content 值，输出为 shenma-site-verification meta，提交后同时进入神马与夸克索引。'],
+            'sogou_verification' => ['label' => '搜狗', 'help' => '搜狗资源平台（zhanzhang.sogou.com）HTML 标签验证的 content 值，输出为 sogou_site_verification meta；平台需资质审核，未通过前留空即可。'],
+            'google_verification' => ['label' => 'Google', 'help' => 'Google Search Console HTML 标签验证的 content 值，输出为 google-site-verification meta。'],
+        ];
+    }
+
+    public static function verify_view(): array
+    {
+        return ['fields' => self::verify_fields(), 'settings' => settings_cache()];
+    }
+
+    public static function verify_handle_post(): never
+    {
+        $values = [];
+        foreach (array_keys(self::verify_fields()) as $key) $values[$key] = post($key, DB_STRING_MAX_LENGTH);
+        save_settings_values($values);
+        set_flash('站点验证已保存');
+        go(admin_url(['tab' => 'verify']));
+    }
+
     public static function groups_view(): array
     {
         return ['groups' => groups_cache()];
@@ -161,18 +189,19 @@ final class Admin
         $tab = (string)($_GET['tab'] ?? 'settings');
         if ($tab === 'settings' && (string)($_GET['debug_log'] ?? '') === 'view') { header('Content-Type: text/plain; charset=utf-8'); echo is_file(DEBUG_LOG_FILE) ? (string)file_get_contents(DEBUG_LOG_FILE) : ''; exit; }
         if ($tab === 'settings' && is_post_request()) self::settings_handle_post();
+        if ($tab === 'verify' && is_post_request()) self::verify_handle_post();
         if ($tab === 'topics' && is_post_request()) self::topics_handle_post();
         if ($tab === 'users' && is_post_request()) self::users_handle_post();
         if ($tab === 'mcp' && is_post_request()) self::mcp_handle_post();
         $template = match ($tab) {
-            'settings' => 'admin/settings.html.twig', 'groups' => 'admin/groups.html.twig', 'forums' => 'admin/forums.html.twig',
+            'settings' => 'admin/settings.html.twig', 'verify' => 'admin/verify.html.twig', 'groups' => 'admin/groups.html.twig', 'forums' => 'admin/forums.html.twig',
             'topics' => 'admin/topics.html.twig', 'users' => 'admin/users.html.twig', 'report' => 'admin/report.html.twig',
             'mcp' => 'admin/mcp.html.twig',
             default => '',
         };
         if ($template === '') err('你访问的页面不存在', 404);
         $view = match ($tab) {
-            'settings' => self::settings_html(), 'groups' => self::groups_view(), 'forums' => self::forums_view(),
+            'settings' => self::settings_html(), 'verify' => self::verify_view(), 'groups' => self::groups_view(), 'forums' => self::forums_view(),
             'topics' => self::topics_view(), 'users' => self::users_view(), 'report' => self::report_view(),
             'mcp' => self::mcp_view(),
             default => [],

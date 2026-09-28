@@ -206,13 +206,15 @@ final class SearchIndex
                     $hit['title'] = self::highlight($source_title, $terms);
                     $t['title_html'] = $hit['title']; // 列表行标题同步标红
                 }
-                // 摘要与回帖命中是聚合展示面（TDK 描述同口径）：联系方式一律脱敏，看原文请进详情页。
-                // 先压平去 markdown 记号再 mask_contacts：占位符 ****** 若先进管线会被当强调记号剥掉
-                $hit['body'] = self::excerpt_html(mask_contacts(self::plain_text($source_body)), $terms);
+                // 摘要与回帖命中与其他页面同口径（mask_topic_contacts）：收费版块对非管理员脱敏，管理员看原文。
+                // 打码必须在压平去 markdown 记号之后执行：占位符 ****** 先进管线会被当强调记号剥掉
+                $body_plain = self::plain_text($source_body);
+                $hit['body'] = self::excerpt_html($mask ? mask_contacts($body_plain) : $body_plain, $terms);
                 foreach ($entry['replies'] as $rid) {
                     $r = $reply_rows[(int)$rid] ?? null;
                     if (!$r) continue;
-                    $reply_text = mask_contacts(self::plain_text((string)$r['body']));
+                    $reply_text = self::plain_text((string)$r['body']);
+                    if ($mask) $reply_text = mask_contacts($reply_text);
                     $hit['replies'][] = [
                         'excerpt' => self::excerpt_html($reply_text, $terms),
                         // floor 参数让详情页定位到该楼层

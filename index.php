@@ -2436,6 +2436,19 @@ function tag_page(): void
                 ['@type' => 'ListItem', 'position' => 2, 'name' => $display_title, 'item' => $tag_url],
             ],
         ],
+        // ItemList：页面上真实可见的前 10 条主题，提升富结果与 AI 摘引时的列表形态资格
+        [
+            '@context' => 'https://schema.org',
+            '@type' => 'ItemList',
+            'name' => $display_title,
+            'numberOfItems' => min(10, count($rows)),
+            'itemListElement' => array_map(static fn(int $i, array $row): array => [
+                '@type' => 'ListItem',
+                'position' => $i + 1,
+                'url' => absolute_url(route_url('topic', ['id' => (int)$row['id']])),
+                'name' => (string)$row['title'],
+            ], array_keys(array_slice($rows, 0, 10)), array_slice(array_values($rows), 0, 10)),
+        ],
     ];
     render_page('tag.html.twig', [
         'tag' => $tag,
@@ -2987,13 +3000,19 @@ function indexnow_key_route(): void
 /** 新主题发布后把 URL 提交到 IndexNow（api.indexnow.org 会分发给 Bing/Yandex 等）。尽力而为：超时/失败静默，不影响发布 */
 function indexnow_submit_topic(int $topic_id): void
 {
+    indexnow_submit_urls([absolute_url(route_url('topic', ['id' => $topic_id]))]);
+}
+/** IndexNow 批量提交（话题词导入、批量建页也走这里）；一次调用最多 1 万条，静默失败 */
+function indexnow_submit_urls(array $urls): void
+{
     $key = trim((string)setting('indexnow_key', ''));
-    if ($key === '' || $topic_id <= 0) return;
+    $urls = array_values(array_filter($urls, static fn(string $u): bool => $u !== ''));
+    if ($key === '' || !$urls) return;
     $payload = json_encode([
         'host' => (string)parse_url(base_url(), PHP_URL_HOST),
         'key' => $key,
         'keyLocation' => absolute_url('seo-indexnow-key.txt'),
-        'urlList' => [absolute_url(route_url('topic', ['id' => $topic_id]))],
+        'urlList' => array_slice($urls, 0, 10000),
     ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     $context = stream_context_create(['http' => [
         'method' => 'POST',

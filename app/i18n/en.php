@@ -157,6 +157,9 @@ return [
     '暂无相关主题，去论坛发一条吧' => 'No related topics yet — start one on the forum',
     '搜索更多相关内容' => 'Search for more about ',
     '相关话题' => 'Related topics',
+    '已收录话题' => 'Topic hub',
+    '查看全部' => 'View all',
+    '篇相关主题' => 'related topics',
 
     // 全站页脚
     '全球旧衣行业资讯与交流社区' => 'Global used-clothing industry news and community',

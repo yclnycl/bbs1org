@@ -211,6 +211,61 @@ final class Gsc
             ->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /**
+     * 收录监控：全站总量 + /tag/ 话题页表现（按展示量降序，后台看板用）。
+     * @return array{totals:array,tag_pages:array,tag_reached:int}
+     */
+    public static function performance(int $days): array
+    {
+        $site = self::site_url() ?: throw new \RuntimeException('GSC 里没有本站资源：请把服务账号加为 Search Console 资源的用户');
+        $end = (new \DateTimeImmutable('-2 days'));
+        $start = $end->modify('-' . max(7, $days) . ' days');
+        $window = ['startDate' => $start->format('Y-m-d'), 'endDate' => $end->format('Y-m-d')];
+        $base = 'https://www.googleapis.com/webmasters/v3/sites/' . rawurlencode($site) . '/searchAnalytics/query';
+        $totals_row = self::api_post($base, $window + ['rowLimit' => 1])['rows'][0] ?? [];
+        $rows = self::api_post($base, $window + ['dimensions' => ['page'], 'rowLimit' => 1000])['rows'] ?? [];
+        $tag_pages = [];
+        foreach ($rows as $row) {
+            if (!is_array($row) || empty($row['keys'][0])) continue;
+            $url = (string)$row['keys'][0];
+            if (!str_contains($url, '/tag/')) continue;
+            $tag_pages[] = [
+                'url' => $url,
+                'clicks' => (int)round((float)($row['clicks'] ?? 0)),
+                'impressions' => (int)round((float)($row['impressions'] ?? 0)),
+                'position' => (float)($row['position'] ?? 0),
+            ];
+        }
+        usort($tag_pages, static fn(array $a, array $b): int => $b['impressions'] <=> $a['impressions']);
+        return [
+            'totals' => [
+                'clicks' => (int)round((float)($totals_row['clicks'] ?? 0)),
+                'impressions' => (int)round((float)($totals_row['impressions'] ?? 0)),
+                'ctr' => (float)($totals_row['ctr'] ?? 0),
+                'position' => (float)($totals_row['position'] ?? 0),
+            ],
+            'tag_pages' => array_slice($tag_pages, 0, 40),
+            'tag_reached' => count($tag_pages),
+        ];
+    }
+
+    /** 看板结果缓存进站点设置（后台打开不每次打 API，按钮刷新） */
+    public static function refresh_performance(int $days): array
+    {
+        $data = self::performance($days);
+        save_settings_values(['gsc_perf_cache' => json_encode($data + ['days' => $days], JSON_UNESCAPED_UNICODE),
+                              'gsc_perf_fetched_at' => (string)now()]);
+        return $data;
+    }
+
+    public static function cached_performance(): array
+    {
+        $raw = setting('gsc_perf_cache', '');
+        if ($raw === '') return [];
+        $data = json_decode($raw, true);
+        return is_array($data) ? $data : [];
+    }
+
     public static function ensure_schema(): void
     {
         if ((int)setting('gsc_schema_version', '0') >= 1) return;

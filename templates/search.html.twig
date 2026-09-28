@@ -19,6 +19,15 @@
             {% endif %}
             {% if query != '' %}
                 <div class="search-page-summary">{{ '搜索'|t }}“{{ query }}”</div>
+                {% if tag_match %}
+                    <div class="search-tag-match">
+                        <div class="search-tag-match-main">
+                            <strong>{{ '已收录话题'|t }}：<a href="{{ tag_match.url }}">{{ tag_match.keyword }}</a></strong>
+                            <span>{{ tag_match.summary }}</span>
+                        </div>
+                        <a class="search-tag-match-go" href="{{ tag_match.url }}">{{ '查看全部'|t }} {{ tag_match.total }} {{ '篇相关主题'|t }}</a>
+                    </div>
+                {% endif %}
                 <ul class="post-list search-page-results">
                     {% if not results %}
                         <li class="empty-state">{{ '没有找到匹配的结果'|t }}</li>

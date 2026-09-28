@@ -293,7 +293,13 @@ final class Admin
     {
         TopicTags::ensure_ready();
         Gsc::ensure_schema();
-        $gsc = ['configured' => Gsc::configured(), 'fetched_at' => (int)setting('gsc_queries_fetched_at', '0'), 'queries' => []];
+        $gsc = ['configured' => Gsc::configured(), 'fetched_at' => (int)setting('gsc_queries_fetched_at', '0'), 'queries' => [],
+                'perf' => Gsc::cached_performance(), 'perf_fetched_at' => (int)setting('gsc_perf_fetched_at', '0')];
+        // 看板表格里展示解码后的关键词而不是百分号编码 URL
+        foreach (($gsc['perf']['tag_pages'] ?? []) as $i => $page) {
+            $path = (string)parse_url((string)$page['url'], PHP_URL_PATH);
+            $gsc['perf']['tag_pages'][$i]['kw'] = rawurldecode((string)substr((string)strrchr($path, '/'), 1));
+        }
         if ($gsc['fetched_at'] > 0) {
             $existing = array_column(TopicTags::admin_list(), 'id', 'keyword');
             foreach (Gsc::stored_queries(50) as $q) {
@@ -328,12 +334,39 @@ final class Admin
             } catch (Throwable $e) {
                 set_flash('Search Console 拉取失败：' . mb_substr($e->getMessage(), 0, 180));
             }
+        } elseif ($action === 'gsc_perf_fetch') {
+            try {
+                $data = Gsc::refresh_performance(28);
+                set_flash('已拉取 Search Console 近 28 天表现：全站展示 ' . number_format($data['totals']['impressions'])
+                    . ' / 点击 ' . number_format($data['totals']['clicks']) . '；话题页有展现的 ' . $data['tag_reached'] . ' 个');
+            } catch (Throwable $e) {
+                set_flash('Search Console 拉取失败：' . mb_substr($e->getMessage(), 0, 180));
+            }
         } elseif ($action === 'import') {
             $query = trim((string)($_POST['query'] ?? ''));
             $chain = (string)($_POST['chain'] ?? '');
             $summary = $query . '相关的行业动态、行情数据与供需信息，本页汇总站内全部相关主题，并持续更新。';
             $ok = $query !== '' && TopicTags::admin_add($query, in_array($chain, TopicTags::chains(), true) ? $chain : '综合资讯', $summary);
             set_flash($ok ? '已导入话题词「' . $query . '」，TDK 与英文译文由队列自动生成' : '导入失败：查询词为空或已是话题词');
+        } elseif ($action === 'import_bulk') {
+            // 批量导入：每行一个关键词（# 开头的行当注释跳过），摘要统一用模板句，TDK 队列会生成更完整的标题描述
+            $chain = in_array((string)($_POST['chain'] ?? ''), TopicTags::chains(), true) ? (string)$_POST['chain'] : '综合资讯';
+            $lines = preg_split('/\r\n|\r|\n/', (string)($_POST['keywords'] ?? '')) ?: [];
+            $added = 0;
+            $skipped = 0;
+            $added_kw = [];
+            foreach ($lines as $line) {
+                $kw = trim($line, " \t　,、;");
+                if ($kw === '' || $kw[0] === '#') continue;
+                if (TopicTags::admin_add($kw, $chain, $kw . '相关的行业动态、行情数据与供需信息，本页汇总站内全部相关主题，并持续更新。')) {
+                    $added++;
+                    $added_kw[] = $kw;
+                } else {
+                    $skipped++;
+                }
+            }
+            if ($added_kw) indexnow_submit_urls(array_map(static fn(string $kw): string => absolute_url(route_url('tag', ['kw' => $kw])), $added_kw));
+            set_flash('批量导入完成：新增 ' . $added . ' 个' . ($skipped > 0 ? '，跳过 ' . $skipped . ' 个（空行/已存在）' : '') . '。TDK 与英文译文由队列自动生成。');
         }
         go(admin_url(['tab' => 'tags']));
     }

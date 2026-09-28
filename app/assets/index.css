@@ -4591,3 +4591,39 @@ table.list{
     line-height: 1.7;
     color: var(--ink-2)
 }
+
+/* 搜索结果页顶部的「已收录话题」卡 */
+.search-tag-match{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    margin: var(--sp-3) 0;
+    padding: var(--sp-3) var(--sp-4);
+    border: 1px solid var(--brand-line);
+    border-left: 3px solid var(--brand);
+    border-radius: var(--r-md);
+    background: var(--brand-softer);
+    font-size: var(--fs-sm);
+    line-height: 1.6
+}
+
+.search-tag-match-main{
+    display: grid;
+    gap: 2px;
+    min-width: 0
+}
+
+.search-tag-match-main a{
+    color: var(--brand-strong)
+}
+
+.search-tag-match-main span{
+    color: var(--ink-3)
+}
+
+.search-tag-match-go{
+    flex: 0 0 auto;
+    font-weight: 600;
+    color: var(--brand-strong)
+}

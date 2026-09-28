@@ -43,6 +43,16 @@ final class Search
             $has_prev = $page > 1;
             $has_next = $data['has_next'];
         }
+        // 搜索词正好命中话题词库时挂话题卡：搜索结果页给聚合页导一个高相关内链（仅中文页）
+        $tag_match = null;
+        if ($query !== '' && $submitted && current_lang() === DEFAULT_LANG) {
+            $tag = TopicTags::find_active($query);
+            if ($tag !== null) {
+                $tag_match = ['keyword' => (string)$tag['keyword'], 'summary' => (string)$tag['summary'],
+                              'url' => route_url('tag', ['kw' => (string)$tag['keyword']]),
+                              'total' => TopicTags::topic_count((string)$tag['keyword'])];
+            }
+        }
         render_page('search.html.twig', [
             'submitted' => $submitted,
             'query' => $query,
@@ -50,6 +60,7 @@ final class Search
             'has_prev' => $has_prev,
             'has_next' => $has_next,
             'page' => $page,
+            'tag_match' => $tag_match,
         ], '搜索');
     }
 }

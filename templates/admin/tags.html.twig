@@ -2,6 +2,43 @@
 {% import 'macros/form.html.twig' as f %}
 {% block admin_body %}
     <div class="form-panel settings-form">
+        <h2>收录监控（Search Console 近 28 天）</h2>
+        {% if not gsc.configured %}
+            <p>未配置凭证：把服务账号 JSON 放到数据卷 <code>app/data/gsc-service-account.json</code>。</p>
+        {% else %}
+            <form method="post">
+                {{ f.token() }}
+                <input type="hidden" name="action" value="gsc_perf_fetch">
+                <div class="row settings-actions">
+                    <button type="submit">刷新表现数据</button>
+                    {% if gsc.perf_fetched_at %}<span>上次拉取：{{ gsc.perf_fetched_at|date('m-d H:i') }}</span>{% endif %}
+                </div>
+            </form>
+            {% if gsc.perf %}
+                <p>全站：展示 <strong>{{ gsc.perf.totals.impressions|number_format }}</strong>，点击 <strong>{{ gsc.perf.totals.clicks|number_format }}</strong>，平均排名 {{ gsc.perf.totals.position|round(1) }}；话题页有展现的 <strong>{{ gsc.perf.tag_reached }}</strong> 个（共 {{ tags|length }} 个）。</p>
+                {% if gsc.perf.tag_pages %}
+                    <table class="list admin-bulk-list">
+                        <tr><th>话题页</th><th>展示</th><th>点击</th><th>平均排名</th></tr>
+                        {% for p in gsc.perf.tag_pages %}
+                            <tr>
+                                <td><a href="{{ p.url }}" target="_blank" rel="noopener">{{ p.kw }}</a></td>
+                                <td>{{ p.impressions|number_format }}</td>
+                                <td>{{ p.clicks }}</td>
+                                <td>{{ p.position|round(1) }}</td>
+                            </tr>
+                        {% endfor %}
+                    </table>
+                {% else %}
+                    <p class="empty-state">话题页还没有搜索展现——新建的话题词要等收录后才有数据。</p>
+                {% endif %}
+            {% elseif gsc.perf_fetched_at %}
+                <p class="empty-state">缓存为空，点上方按钮刷新。</p>
+            {% else %}
+                <p class="empty-state">还没拉取过——点上方按钮。数据窗口为近 28 天（GSC 有 2-3 天滞后）。</p>
+            {% endif %}
+        {% endif %}
+    </div>
+    <div class="form-panel settings-form">
         <h2>Search Console 查询词 → 候选话题词</h2>
         {% if not gsc.configured %}
             <p>未配置凭证：把服务账号 JSON 放到数据卷 <code>app/data/gsc-service-account.json</code>（密钥不上传代码库），并在 GSC 后台把该服务账号加为本资源的用户。</p>
@@ -53,6 +90,21 @@
                 <p class="empty-state">查询词表为空——点上方「拉取查询词」。</p>
             {% endif %}
         {% endif %}
+    </div>
+    <div class="form-panel settings-form">
+        <h2>批量导入候选词</h2>
+        <p>每行一个关键词（# 开头的行跳过）。适合从关键词库报告或外部词表整批导入；摘要用模板句，TDK 队列会生成更完整的标题与描述。导入后自动提交 IndexNow 加速收录。</p>
+        <form method="post">
+            {{ f.token() }}
+            <input type="hidden" name="action" value="import_bulk">
+            <div class="row settings-actions">
+                <select name="chain" aria-label="产业链环节">
+                    {% for c in chains %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="row settings-actions"><textarea name="keywords" rows="6" placeholder="每行一个关键词，如：&#10;羽绒服回收&#10;旧衣出口非洲&#10;# 这行是注释" style="width:100%"></textarea></div>
+            <div class="row settings-actions"><button type="submit">批量导入</button></div>
+        </form>
     </div>
     <div class="form-panel settings-form">
         <h2>新增话题词</h2>

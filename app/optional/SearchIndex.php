@@ -206,12 +206,13 @@ final class SearchIndex
                     $hit['title'] = self::highlight($source_title, $terms);
                     $t['title_html'] = $hit['title']; // 列表行标题同步标红
                 }
-                $hit['body'] = self::excerpt_html(self::plain_text($mask ? mask_contacts($source_body) : $source_body), $terms);
+                // 摘要与回帖命中是聚合展示面（TDK 描述同口径）：联系方式一律脱敏，看原文请进详情页。
+                // 先压平去 markdown 记号再 mask_contacts：占位符 ****** 若先进管线会被当强调记号剥掉
+                $hit['body'] = self::excerpt_html(mask_contacts(self::plain_text($source_body)), $terms);
                 foreach ($entry['replies'] as $rid) {
                     $r = $reply_rows[(int)$rid] ?? null;
                     if (!$r) continue;
-                    $reply_text = self::plain_text((string)$r['body']);
-                    if ($mask) $reply_text = mask_contacts($reply_text);
+                    $reply_text = mask_contacts(self::plain_text((string)$r['body']));
                     $hit['replies'][] = [
                         'excerpt' => self::excerpt_html($reply_text, $terms),
                         // floor 参数让详情页定位到该楼层
@@ -351,7 +352,8 @@ final class SearchIndex
         return ($from > 0 ? '…' : '') . self::highlight(substr($text, $from, $to - $from), $terms) . ($to < strlen($text) ? '…' : '');
     }
 
-    /** 摘要源文本：去代码块标记、压平空白，并抹掉标题井号/加粗/行内代码记号（链接原样保留） */
+    /** 摘要源文本：去代码块标记、压平空白，并抹掉标题井号/加粗/行内代码记号（链接原样保留）。
+     *  必须先于 mask_contacts 执行：占位符 ****** 是连续星号，经这里的强调记号剥离会被吃掉。 */
     private static function plain_text(string $body): string
     {
         $body = content_preview_source_text($body);

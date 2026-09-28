@@ -103,7 +103,11 @@ const openMobileMenu = async () => {
     body.dataset.loaded = "loading";
     body.textContent = "加载中…";
     try {
-        const response = await fetch(mobileMenu.dataset.mobileMenuUrl, {headers: {"X-Requested-With": "XMLHttpRequest"}});
+        // 把当前页地址带给片段端点：抽屉里的语言切换链接需要以当前页为跳回目标
+        const menuUrl = mobileMenu.dataset.mobileMenuUrl;
+        const back = encodeURIComponent(location.pathname + location.search);
+        const menuUrlWithBack = menuUrl + (menuUrl.includes("?") ? "&" : "?") + "back=" + back;
+        const response = await fetch(menuUrlWithBack, {headers: {"X-Requested-With": "XMLHttpRequest"}});
         if (!response.ok) throw new Error();
         body.innerHTML = await response.text();
         body.dataset.loaded = "1";

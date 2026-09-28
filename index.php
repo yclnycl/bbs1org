@@ -589,10 +589,13 @@ function mobile_menu_content_html(?array $mine = null, ?array $forums = null): s
         ['title' => t('版块列表'), 'links' => $forum_links],
         ['title' => t('我的菜单'), 'links' => $my_links],
     ];
-    // 语言切换走 /lang 端点：先写偏好 cookie 再跳目标语言页面，避免被语言协商跳回
+    // 语言切换走 /lang 端点：先写偏好 cookie 再跳目标语言页面，避免被语言协商跳回；
+    // 抽屉是片段端点，当前页地址由前端 fetch 时以 back 参数带上，没有就退回目标语言首页
     if (enabled_langs()) {
-        $lang_links = [['text' => '中文', 'url' => lang_switch_url(DEFAULT_LANG)]];
-        foreach (enabled_langs() as $lang) $lang_links[] = ['text' => strtoupper($lang), 'url' => lang_switch_url($lang)];
+        $lang_back = lang_back_target();
+        // back 为空（前端没带或非法）时不传，由 /lang 端点回落到目标语言首页
+        $lang_links = [['text' => '中文', 'url' => lang_switch_url(DEFAULT_LANG, $lang_back)]];
+        foreach (enabled_langs() as $lang) $lang_links[] = ['text' => strtoupper($lang), 'url' => lang_switch_url($lang, $lang_back)];
         $sections[] = ['title' => t('语言'), 'links' => $lang_links];
     }
     return template('mobile_menu.html.twig', ['sections' => $sections]);
@@ -1190,15 +1193,22 @@ function request_is_bot(): bool
 function lang_url(string $lang): string
 {
     $params = $_GET;
-    $a = (string)($params['a'] ?? 'home');
-    unset($params['a'], $params['id']);
-    return route_url($a, $params, $lang);
+    // id 要留在 params 里：route_url 会把它挪进路径段（/topic/1596），删掉会丢 id 变成 /topic
+    unset($params['a']);
+    return route_url((string)($params['a'] ?? 'home') === '' ? 'home' : (string)$_GET['a'], $params, $lang);
 }
 
-/** 切换到指定语言的链接（先经 /lang 写偏好 cookie 再跳目标页，否则会被语言协商跳回来） */
-function lang_switch_url(string $lang): string
+/** 切换到指定语言的链接（先经 /lang 写偏好 cookie 再跳目标页，否则会被语言协商跳回来）；back 可显式指定跳回地址（片段端点里当前页由前端传入） */
+function lang_switch_url(string $lang, ?string $back = null): string
 {
-    return append_url_query(route_url('lang'), ['to' => $lang, 'back' => lang_url($lang)]);
+    return append_url_query(route_url('lang'), ['to' => $lang, 'back' => $back ?? lang_url($lang)]);
+}
+
+/** 语言切换的跳回地址：只接受站内路径（不开外链、不循环到 /lang 自身） */
+function lang_back_target(): string
+{
+    $back = (string)($_GET['back'] ?? '');
+    return $back !== '' && str_starts_with($back, '/') && !str_starts_with($back, '//') && !str_starts_with($back, '/lang') ? $back : '';
 }
 
 /** 语言切换端点（/lang?to=en&back=/topic/5）：写偏好 cookie 后跳回目标页面，back 只接受站内路径 */
@@ -1207,8 +1217,7 @@ function lang_switch_route(): void
     $to = strtolower(trim((string)($_GET['to'] ?? '')));
     if ($to !== DEFAULT_LANG && !in_array($to, enabled_langs(), true)) err('不支持的语言');
     app_cookie(LANG_COOKIE_NAME, $to, time() + COOKIE_TTL, true, false);
-    $back = (string)($_GET['back'] ?? '');
-    go($back !== '' && str_starts_with($back, '/') && !str_starts_with($back, '//') && !str_starts_with($back, '/lang') ? $back : route_url('home', [], $to));
+    go(lang_back_target() ?: route_url('home', [], $to));
 }
 
 /**
@@ -1234,7 +1243,7 @@ function i18n_redirect_guard(string $route): void
     $target = negotiate_lang();
     if ($target === null || $target === current_lang()) return;
     $params = $_GET;
-    unset($params['a'], $params['id']);
+    unset($params['a']); // id 保留：route_url 会把它拼进路径段
     go(route_url($route, $params, $target));
 }
 

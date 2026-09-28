@@ -1348,7 +1348,7 @@ function post_forum_options(): array
 /** 主题列表需要的列；列表不展示正文，所以不带 body */
 function topic_list_columns(): array
 {
-    return ['id', 'title', 'highlight_style', 'created_at', 'reply_count', 'last_reply_at', 'last_reply_user_id', 'forum_id', 'user_id'];
+    return ['id', 'title', 'highlight_style', 'created_at', 'reply_count', 'view_count', 'last_reply_at', 'last_reply_user_id', 'forum_id', 'user_id'];
 }
 function search_min_chars(): int
 {

@@ -109,7 +109,7 @@
 {%- set last_reply_user = last_reply_username != '' ? '<span>' ~ _self.icon('user') ~ last_reply_username|e ~ '</span>' : '' -%}
 {%- set time_meta = '<span>' ~ human_time(time) ~ '</span>' -%}
 {%- set forum_meta = has_forum ? '<span class="post-forum-meta">' ~ _self.icon('forum') ~ forum_link ~ '</span>' : '' -%}
-{%- set meta = '<span>' ~ user_link ~ '</span>' ~ (sort == 'post' ? time_meta : '') ~ forum_meta ~ '<span>' ~ _self.icon('reply') ~ t.reply_count ~ '</span>' ~ last_reply_user ~ (sort == 'post' ? '' : time_meta) -%}
+{%- set meta = '<span>' ~ user_link ~ '</span>' ~ (sort == 'post' ? time_meta : '') ~ forum_meta ~ '<span>' ~ _self.icon('view') ~ t.view_count|default(0) ~ '</span>' ~ '<span>' ~ _self.icon('reply') ~ t.reply_count ~ '</span>' ~ last_reply_user ~ (sort == 'post' ? '' : time_meta) -%}
 {%- set pages = _self.topic_pages(t.id, t.reply_count) -%}
 {%- set reply_id = t.my_reply_id|default(0) -%}
 {%- set topic_url = route_url('topic', {id: t.id, replyid: reply_id > 0 ? reply_id : null}) -%}

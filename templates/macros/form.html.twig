@@ -3,7 +3,7 @@
     用法：{% import 'macros/form.html.twig' as f %}
 #}
 
-{% macro caption(label, help) %}<span>{{ label }}{% if help|default('') != '' %}<small>{{ help }}</small>{% endif %}</span>{% endmacro %}
+{% macro caption(label, help, link, link_label) %}<span>{{ label }}{% if help|default('') != '' %}<small>{{ help }}</small>{% endif %}{% if link|default('') != '' %}<small><a href="{{ link }}" target="_blank" rel="noopener">{{ link_label|default('打开平台 ↗') }}</a></small>{% endif %}</span>{% endmacro %}
 
 {% macro length_attrs(name) %}
 {%- set limits = length_limits(name) -%}
@@ -29,8 +29,8 @@
 {%- for name, value in fields %}{% if value is not null %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endif %}{% endfor -%}
 {% endmacro %}
 
-{% macro input(label, name, value, type, required, help, class) %}
-<label class="grid{{ class|default('') != '' ? ' ' ~ class : '' }}">{{ _self.caption(label, help|default('')) }}<input name="{{ name }}" type="{{ type|default('text') }}" value="{{ value }}"{{ _self.length_attrs(name)|raw }}{{ required ? ' required' : '' }}></label>
+{% macro input(label, name, value, type, required, help, class, link) %}
+<label class="grid{{ class|default('') != '' ? ' ' ~ class : '' }}">{{ _self.caption(label, help|default(''), link|default('')) }}<input name="{{ name }}" type="{{ type|default('text') }}" value="{{ value }}"{{ _self.length_attrs(name)|raw }}{{ required ? ' required' : '' }}></label>
 {%- endmacro %}
 
 {% macro textarea(label, name, value, required, help, class) %}
@@ -92,7 +92,7 @@
 {%- elseif type == 'textarea' -%}
 {{- _self.textarea(label, name, value, field.required|default(false), help, class) -}}
 {%- else -%}
-{{- _self.input(label, name, value, type, field.required|default(false), help, class) -}}
+{{- _self.input(label, name, value, type, field.required|default(false), help, class, field.link|default('')) -}}
 {%- endif -%}
 {%- endfor -%}
 {% endmacro %}

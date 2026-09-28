@@ -145,17 +145,17 @@ final class Admin
         ];
     }
 
-    /** 各搜索引擎站点验证的 meta 标签输出在 templates/layout.html.twig，这里只管后台字段与取值 */
+    /** 各搜索引擎站点验证的 meta 标签输出在 templates/layout.html.twig，这里只管后台字段与取值；link 是对应站长平台的入口，模板里新窗口打开 */
     public static function verify_fields(): array
     {
         return [
-            'baidu_verification' => ['label' => '百度', 'help' => '百度搜索资源平台（ziyuan.baidu.com）HTML 标签验证的 content 值，输出为 baidu-site-verification meta。'],
-            'bing_verification' => ['label' => '必应', 'help' => 'Bing 站长工具（bing.com/webmasters）HTML 标签验证的 content 值，输出为 msvalidate.01 meta。'],
-            'toutiao_verification' => ['label' => '头条/抖音搜索', 'help' => '头条搜索站长平台（zhanzhang.toutiao.com）HTML 标签验证的 content 值，输出为 bytedance-verification-code meta，收录后可进抖音搜索与豆包。'],
-            'so_verification' => ['label' => '360 搜索', 'help' => '360 站长平台（zhanzhang.so.com）HTML 标签验证的 content 值，输出为 360-site-verification meta。'],
-            'sm_verification' => ['label' => '神马（夸克）', 'help' => '神马站长平台（zhanzhang.sm.cn）HTML 标签验证的 content 值，输出为 shenma-site-verification meta，提交后同时进入神马与夸克索引。'],
-            'sogou_verification' => ['label' => '搜狗', 'help' => '搜狗资源平台（zhanzhang.sogou.com）HTML 标签验证的 content 值，输出为 sogou_site_verification meta；平台需资质审核，未通过前留空即可。'],
-            'google_verification' => ['label' => 'Google', 'help' => 'Google Search Console HTML 标签验证的 content 值，输出为 google-site-verification meta。'],
+            'baidu_verification' => ['label' => '百度', 'link' => 'https://ziyuan.baidu.com/', 'help' => '百度搜索资源平台（ziyuan.baidu.com）HTML 标签验证的 content 值，输出为 baidu-site-verification meta。'],
+            'bing_verification' => ['label' => '必应', 'link' => 'https://www.bing.com/webmasters/', 'help' => 'Bing 站长工具（bing.com/webmasters）HTML 标签验证的 content 值，输出为 msvalidate.01 meta。'],
+            'toutiao_verification' => ['label' => '头条/抖音搜索', 'link' => 'https://zhanzhang.toutiao.com/', 'help' => '头条搜索站长平台（zhanzhang.toutiao.com）HTML 标签验证的 content 值，输出为 bytedance-verification-code meta，收录后可进抖音搜索与豆包。'],
+            'so_verification' => ['label' => '360 搜索', 'link' => 'https://zhanzhang.so.com/', 'help' => '360 站长平台（zhanzhang.so.com）HTML 标签验证的 content 值，输出为 360-site-verification meta。'],
+            'sm_verification' => ['label' => '神马（夸克）', 'link' => 'https://zhanzhang.sm.cn/', 'help' => '神马站长平台（zhanzhang.sm.cn）HTML 标签验证的 content 值，输出为 shenma-site-verification meta，提交后同时进入神马与夸克索引。'],
+            'sogou_verification' => ['label' => '搜狗', 'link' => 'https://zhanzhang.sogou.com/', 'help' => '搜狗资源平台（zhanzhang.sogou.com）HTML 标签验证的 content 值，输出为 sogou_site_verification meta；平台需资质审核，未通过前留空即可。'],
+            'google_verification' => ['label' => 'Google', 'link' => 'https://search.google.com/search-console/', 'help' => 'Google Search Console HTML 标签验证的 content 值，输出为 google-site-verification meta。'],
         ];
     }
 

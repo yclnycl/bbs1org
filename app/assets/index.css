@@ -2203,6 +2203,17 @@ label.grid:has(> textarea)>span{
     line-height: var(--lh-snug)
 }
 
+/* 帮助文字旁的站长平台入口链接，新窗口打开 */
+.settings-help-field small a{
+    color: var(--brand-strong);
+    font-weight: 500;
+    text-decoration: none
+}
+
+.settings-help-field small a:hover{
+    text-decoration: underline
+}
+
 /* 后台设置页的工具卡片 */
 /* 工具卡片限制最大宽度，避免只有一张卡时被拉成整行 */
 .settings-tool-grid{

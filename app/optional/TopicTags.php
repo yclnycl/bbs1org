@@ -222,7 +222,7 @@ final class TopicTags
      * 话题页主题列表：全文索引命中该关键词的主题，按时间倒序（话题页是「最新动态」入口）。
      * 行结构与首页列表一致，可直接交给 ui.topic_list_row；脱敏口径与列表页相同。
      */
-    public static function topic_rows(string $keyword, int $limit): array
+    public static function topic_rows(string $keyword, int $limit, int $offset = 0): array
     {
         self::ensure_ready();
         $limit = min(max(1, $limit), self::LIST_LIMIT_MAX);
@@ -237,11 +237,13 @@ final class TopicTags
             }
         }
         if ($ids) {
-            $rows = Topic::whereIn('id', $ids)->orderByDesc('id')->limit($limit)->get()->map->toArray()->all();
+            // ids 已按 id 升序，翻页取尾部窗口；orderByDesc(id) 保证与时间倒序一致
+            $page_ids = array_slice($ids, -$offset - $limit, $limit);
+            $rows = $page_ids ? Topic::whereIn('id', $page_ids)->orderByDesc('id')->get()->map->toArray()->all() : [];
         } else {
             // FTS 不可用或关键词构不成表达式：标题 LIKE 兜底
             $rows = Topic::where('title', 'LIKE', search_like_pattern($keyword))
-                ->orderByDesc('id')->limit($limit)->get()->map->toArray()->all();
+                ->orderByDesc('id')->limit($limit)->offset(max(0, $offset))->get()->map->toArray()->all();
         }
         $rows = attach_topic_list_users($rows);
         foreach ($rows as &$t) {
@@ -252,5 +254,26 @@ final class TopicTags
         }
         unset($t);
         return $rows;
+    }
+
+    /** 命中该关键词的主题总数（翻页用）；与 topic_rows 的匹配口径一致（FTS，退化为标题 LIKE） */
+    public static function topic_count(string $keyword): int
+    {
+        self::ensure_ready();
+        if (SearchIndex::available()) {
+            $plan = SearchIndex::match_plan($keyword);
+            if ($plan !== null) {
+                $st = db()->prepare('SELECT COUNT(*) FROM plugin_fts_topics WHERE plugin_fts_topics MATCH ?');
+                $st->execute([$plan['expr']]);
+                return (int)$st->fetchColumn();
+            }
+        }
+        return (int)Topic::where('title', 'LIKE', search_like_pattern($keyword))->count();
+    }
+
+    /** 候选词预检：该词的站内命中数（后台导入面板用，命中过少不建议建页） */
+    public static function site_hits(string $keyword): int
+    {
+        return min(self::topic_count($keyword), 9999);
     }
 }

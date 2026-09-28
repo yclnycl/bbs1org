@@ -181,6 +181,15 @@ return [
     '如何联系站点？' => 'How do I contact the site?',
     '可在行业动态版块发帖留言，编辑部会定期查看处理。' => 'Post a note in the Industry News board — the editors check it regularly.',
 
+    // 话题页产业链环节介绍块
+    '旧衣从居民端进入回收体系的第一环：回收箱投放与清运、上门回收平台、衣物捐赠渠道，以及前端回收的计价方式与合规监管。' => 'The first link of the chain, where used clothing enters the recycling system: collection-bin deployment and pickup, door-to-door platforms, clothing donation channels, and front-end pricing and compliance.',
+    '回收后的旧衣服在这里变成商品：分拣分级、打包压缩、统货与等级货批发，货源组织与库存尾货流通都发生在这一环。' => 'Where collected clothing becomes product: grading and sorting, baling, mixed-grade and graded wholesale, plus sourcing and the stock-lot trade.',
+    '分拣后的旧衣装柜出运：出口目的国结构、海关数据、装柜报价与贸易政策，构成旧衣出口商每天跟踪的核心变量。' => 'Sorted clothing gets containerized and shipped: destination mix, customs data, container pricing and trade policy — the variables exporters track daily.',
+    '二手服装到达目的国后的市场：各国的进口政策与关税、当地批发市场行情，以及进口禁令对全球贸易流向的重塑。' => 'Markets at destination: import policies and tariffs country by country, local wholesale prices, and how import bans reshape global trade flows.',
+    '旧衣与废纺的再利用路径：再生纤维与化学回收技术、fiber-to-fiber 闭环、快时尚治理与可持续时尚的产业实践。' => 'How textiles cycle back: recycled fiber and chemical recycling technology, fiber-to-fiber loops, fast-fashion regulation and circular fashion practice.',
+    '旧衣产业链的原料价格参考：羽绒分档报价、棉花期货走势，以及再生羽绒等循环原料的行情数据。' => 'Raw-material price reference for the trade: graded down quotations, cotton futures trends, and circular feedstocks such as reclaimed down.',
+    '跨环节的行业全景：二手交易平台财报、EPR 等政策立法、二手市场宏观数据与产业分析报道。' => 'Cross-chain industry coverage: resale platform earnings, EPR legislation, secondhand-market macro data and industry analysis.',
+
     // 联系方式打码弹窗（前端从 body data 属性读取）
     '添加微信' => 'Add on WeChat',
     '微信二维码' => 'WeChat QR code',

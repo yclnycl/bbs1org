@@ -141,6 +141,11 @@ final class Translator
                     // 批内已持租约，直接走不带租约的内部方法，避免自己挡自己
                     self::translate_topic_row($lang, $db->query('SELECT * FROM app_topics WHERE id=' . (int)$topic_id)->fetch(PDO::FETCH_ASSOC) ?: null) ? $done++ : $failed++;
                 }
+                // 话题词（keyword + 定义摘要）队列：英文化话题聚合页，吃海外长尾
+                foreach (self::pending_tag_ids($lang, $batch) as $tag_row) {
+                    $result = self::translate_pair($lang, 'tag', (int)$tag_row['id'], (string)$tag_row['keyword'], (string)$tag_row['summary']);
+                    $result === false ? $failed++ : $done++;
+                }
             }
             return ['done' => $done, 'failed' => $failed, 'skipped' => 0];
         } finally {
@@ -185,6 +190,19 @@ final class Translator
             ORDER BY (t.content_updated_at > COALESCE(c.updated_at, 0)) DESC, t.id DESC LIMIT " . max(1, $limit));
         $st->execute([$lang, self::ATTEMPT_LIMIT]);
         return array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /** 待翻话题词：启用中且无有效译文的（表未播种时安静跳过） */
+    private static function pending_tag_ids(string $lang, int $limit): array
+    {
+        $db = db();
+        if (!(int)$db->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='plugin_topic_tags'")->fetchColumn()) return [];
+        $st = $db->prepare("SELECT g.id, g.keyword, g.summary FROM plugin_topic_tags g
+            LEFT JOIN plugin_i18n_content c ON c.lang=? AND c.target_type='tag' AND c.target_id=g.id
+            WHERE g.status='active' AND (c.id IS NULL OR (c.status='failed' AND c.attempts<?))
+            ORDER BY g.position, g.id LIMIT " . max(1, $limit));
+        $st->execute([$lang, self::ATTEMPT_LIMIT]);
+        return $st->fetchAll(PDO::FETCH_ASSOC);
     }
 
     private static function translate_topic_row(string $lang, ?array $t): bool

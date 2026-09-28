@@ -2,6 +2,59 @@
 {% import 'macros/form.html.twig' as f %}
 {% block admin_body %}
     <div class="form-panel settings-form">
+        <h2>Search Console 查询词 → 候选话题词</h2>
+        {% if not gsc.configured %}
+            <p>未配置凭证：把服务账号 JSON 放到数据卷 <code>app/data/gsc-service-account.json</code>（密钥不上传代码库），并在 GSC 后台把该服务账号加为本资源的用户。</p>
+        {% else %}
+            <p>拉取 GSC 真实查询词（按展示量降序），「站内命中」是该词的全文索引主题数，≥3 建页效果最好。导入后 TDK 与英文译文由队列自动生成。GSC 数据有 2-3 天滞后。</p>
+            <form method="post">
+                {{ f.token() }}
+                <input type="hidden" name="action" value="gsc_fetch">
+                <div class="row settings-actions">
+                    <select name="days" aria-label="时间窗口">
+                        <option value="28">最近 28 天</option>
+                        <option value="90">最近 90 天</option>
+                    </select>
+                    <button type="submit">拉取查询词</button>
+                    {% if gsc.fetched_at %}<span>上次拉取：{{ gsc.fetched_at|date('m-d H:i') }}</span>{% endif %}
+                </div>
+            </form>
+            {% if gsc.queries %}
+                <table class="list admin-bulk-list">
+                    <tr><th>查询词</th><th>展示</th><th>点击</th><th>排名</th><th>站内命中</th><th>操作</th></tr>
+                    {% for q in gsc.queries %}
+                        <tr>
+                            <td>{{ q.query }}</td>
+                            <td>{{ q.impressions }}</td>
+                            <td>{{ q.clicks }}</td>
+                            <td>{{ q.position|round(1) }}</td>
+                            <td>{{ q.hits }}{% if q.hits >= 3 %} ✓{% elseif q.hits > 0 %}（偏少）{% else %} ✗ 无命中{% endif %}</td>
+                            <td>
+                                {% if q.is_tag %}
+                                    已是话题词
+                                {% elseif q.hits > 0 %}
+                                    <form method="post">
+                                        {{ f.token() }}
+                                        <input type="hidden" name="action" value="import">
+                                        <input type="hidden" name="query" value="{{ q.query }}">
+                                        <select name="chain" aria-label="产业链环节">
+                                            {% for c in chains %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+                                        </select>
+                                        <button type="submit">导入</button>
+                                    </form>
+                                {% else %}
+                                    <small>无站内内容，先补数据</small>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </table>
+            {% elseif gsc.fetched_at %}
+                <p class="empty-state">查询词表为空——点上方「拉取查询词」。</p>
+            {% endif %}
+        {% endif %}
+    </div>
+    <div class="form-panel settings-form">
         <h2>新增话题词</h2>
         <p>话题词驱动 /tag/{关键词} 聚合页、首页侧栏、页脚与主题页「相关话题」内链。摘要用一句定义式陈述（会作为页面首段与 meta description 兜底），TDK 标题/描述由 SEO TDK 队列自动生成。</p>
         <form method="post">

@@ -4578,3 +4578,16 @@ table.list{
         margin: var(--sp-4) var(--sp-3)
     }
 }
+
+/* 话题页产业链环节介绍块 */
+.tag-chain-note{
+    margin: 0 var(--panel-pad) var(--sp-3);
+    padding: var(--sp-3) var(--sp-4);
+    border: 1px solid var(--brand-line);
+    border-left: 3px solid var(--brand);
+    border-radius: var(--r-md);
+    background: var(--brand-softer);
+    font-size: var(--fs-sm);
+    line-height: 1.7;
+    color: var(--ink-2)
+}

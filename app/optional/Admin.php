@@ -288,11 +288,21 @@ final class Admin
         return ['groups' => groups_cache()];
     }
 
-    /** 话题词 tab：词库列表（含 TDK 生成状态）+ 产业链环节选项 */
+    /** 话题词 tab：词库列表（含 TDK 状态）+ Search Console 查询词候选（带站内命中预检） */
     public static function tags_view(): array
     {
         TopicTags::ensure_ready();
-        return ['tags' => TopicTags::admin_list(), 'chains' => TopicTags::chains()];
+        Gsc::ensure_schema();
+        $gsc = ['configured' => Gsc::configured(), 'fetched_at' => (int)setting('gsc_queries_fetched_at', '0'), 'queries' => []];
+        if ($gsc['fetched_at'] > 0) {
+            $existing = array_column(TopicTags::admin_list(), 'id', 'keyword');
+            foreach (Gsc::stored_queries(50) as $q) {
+                $q['hits'] = TopicTags::site_hits((string)$q['query']);
+                $q['is_tag'] = isset($existing[(string)$q['query']]);
+                $gsc['queries'][] = $q;
+            }
+        }
+        return ['tags' => TopicTags::admin_list(), 'chains' => TopicTags::chains(), 'gsc' => $gsc];
     }
 
     public static function tags_handle_post(): never
@@ -310,6 +320,20 @@ final class Admin
         } elseif ($action === 'toggle') {
             $status = TopicTags::admin_toggle((int)($_POST['id'] ?? 0));
             set_flash($status === 'active' ? '话题词已启用' : '话题词已停用（页面 404，从 sitemap 与内链移除）');
+        } elseif ($action === 'gsc_fetch') {
+            $days = in_array((int)($_POST['days'] ?? 28), [28, 90], true) ? (int)$_POST['days'] : 28;
+            try {
+                $n = Gsc::refresh_queries($days);
+                set_flash('已拉取 Search Console 最近' . $days . '天 ' . $n . ' 条查询词');
+            } catch (Throwable $e) {
+                set_flash('Search Console 拉取失败：' . mb_substr($e->getMessage(), 0, 180));
+            }
+        } elseif ($action === 'import') {
+            $query = trim((string)($_POST['query'] ?? ''));
+            $chain = (string)($_POST['chain'] ?? '');
+            $summary = $query . '相关的行业动态、行情数据与供需信息，本页汇总站内全部相关主题，并持续更新。';
+            $ok = $query !== '' && TopicTags::admin_add($query, in_array($chain, TopicTags::chains(), true) ? $chain : '综合资讯', $summary);
+            set_flash($ok ? '已导入话题词「' . $query . '」，TDK 与英文译文由队列自动生成' : '导入失败：查询词为空或已是话题词');
         }
         go(admin_url(['tab' => 'tags']));
     }

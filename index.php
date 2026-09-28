@@ -1574,7 +1574,23 @@ function lang_alternates(): array
     static $pages = ['home', 'forum', 'topic', 'about'];
     $langs = enabled_langs();
     $route = (string)($_GET['a'] ?? 'home');
-    if (!$langs || !in_array($route, $pages, true) || is_post_request()) return [];
+    if (!$langs || is_post_request()) return [];
+    if (!in_array($route, $pages, true)) {
+        if ($route !== 'tag') return [];
+        // 话题页：只给已有译文的语言输出互补链接（没译文的 /en/tag 是 302，不能进 hreflang）
+        $kw = trim((string)($_GET['kw'] ?? ''));
+        $tag_row = $kw !== '' ? TopicTags::find_active($kw) : null;
+        if ($tag_row === null) return [];
+        $alternates = [DEFAULT_LANG => absolute_url(route_url('tag', ['kw' => $kw], DEFAULT_LANG))];
+        foreach ($langs as $lang) {
+            if (Translator::content_for($lang, 'tag', (int)$tag_row['id']) !== null) {
+                $alternates[$lang] = absolute_url(route_url('tag', ['kw' => $kw], $lang));
+            }
+        }
+        if (count($alternates) < 2) return [];
+        $alternates['x-default'] = $alternates[$langs[0]] ?? $alternates[DEFAULT_LANG];
+        return $alternates;
+    }
     $alternates = [DEFAULT_LANG => absolute_url(lang_url(DEFAULT_LANG))];
     foreach ($langs as $lang) $alternates[$lang] = absolute_url(lang_url($lang));
     $alternates['x-default'] = $alternates[$langs[0]];
@@ -2368,16 +2384,38 @@ function tag_page(): void
 {
     $kw = trim((string)($_GET['kw'] ?? ''));
     if ($kw === '' || search_char_count($kw) > 30) err('你访问的页面不存在', 404);
-    // 话题页只有中文内容：非默认语言一律回中文页，避免同内容多语言重复收录
-    if (current_lang() !== DEFAULT_LANG) go(route_url('tag', ['kw' => $kw], DEFAULT_LANG));
     TopicTags::ensure_ready();
     $tag = TopicTags::find_active($kw) ?: err('你访问的页面不存在', 404);
-    $rows = TopicTags::topic_rows($kw, 100);
-    // TDK 队列产出优先（AI 生成、含真实语料行业词）；没生成过就用关键词 + 手写摘要兜底
-    $tdk = TopicTDK::meta_for_tag((int)$tag['id']);
-    $page_title = $tdk !== null && trim((string)$tdk['title']) !== '' ? (string)$tdk['title'] : (string)$tag['keyword'];
-    $page_description = $tdk !== null && trim((string)$tdk['description']) !== '' ? (string)$tdk['description'] : (string)$tag['summary'];
-    $seo = page_seo('tag', ['kw' => $kw], $page_description, $page_title);
+    $p = max(1, (int)($_GET['p'] ?? 1));
+    $size = 30;
+    $rows = TopicTags::topic_rows($kw, $size, ($p - 1) * $size);
+    $total = TopicTags::topic_count($kw);
+    // 话题词已翻成当前语言时页面整体英文化；译文未生成先回中文页（队列会自动补翻，翻完该语言自动可访问）
+    $display_title = (string)$tag['keyword'];
+    $display_summary = (string)$tag['summary'];
+    $is_zh = current_lang() === DEFAULT_LANG;
+    if (!$is_zh) {
+        $content = Translator::content_for(current_lang(), 'tag', (int)$tag['id']);
+        if ($content === null) go(route_url('tag', ['kw' => $kw], DEFAULT_LANG));
+        if (trim((string)$content['title']) !== '') $display_title = (string)$content['title'];
+        if (trim((string)$content['body']) !== '') $display_summary = (string)$content['body'];
+        // 列表行标题用已有译文（无译文的行保留中文原文）
+        $title_map = Translator::topic_titles(current_lang(), array_map(static fn($r) => (int)$r['id'], $rows));
+        foreach ($rows as &$row) {
+            if (($title_map[(int)$row['id']] ?? '') !== '') $row['title'] = $title_map[(int)$row['id']];
+        }
+        unset($row);
+    }
+    // TDK 队列产出优先（AI 生成、含真实语料行业词），只在中文页生效；英文页标题用译文
+    if ($is_zh) {
+        $tdk = TopicTDK::meta_for_tag((int)$tag['id']);
+        $page_title = $tdk !== null && trim((string)$tdk['title']) !== '' ? (string)$tdk['title'] : $display_title;
+        $page_description = $tdk !== null && trim((string)$tdk['description']) !== '' ? (string)$tdk['description'] : $display_summary;
+    } else {
+        $page_title = $display_title;
+        $page_description = $display_summary;
+    }
+    $seo = page_seo('tag', ['kw' => $kw] + ($p > 1 ? ['p' => $p] : []), $page_description, $page_title);
     $tag_url = absolute_url(route_url('tag', ['kw' => $kw]));
     $seo['jsonld'] = [
         [
@@ -2385,9 +2423,9 @@ function tag_page(): void
             '@type' => 'CollectionPage',
             '@id' => $tag_url . '#collection',
             'url' => $tag_url,
-            'name' => (string)$tag['keyword'],
-            'description' => (string)$tag['summary'],
-            'inLanguage' => 'zh-CN',
+            'name' => $display_title,
+            'description' => $display_summary,
+            'inLanguage' => current_lang() === DEFAULT_LANG ? 'zh-CN' : current_lang(),
             'isPartOf' => ['@id' => rtrim(base_url(), '/') . '/#website'],
         ],
         [
@@ -2395,15 +2433,19 @@ function tag_page(): void
             '@type' => 'BreadcrumbList',
             'itemListElement' => [
                 ['@type' => 'ListItem', 'position' => 1, 'name' => t('首页'), 'item' => rtrim(base_url(), '/') . '/'],
-                ['@type' => 'ListItem', 'position' => 2, 'name' => (string)$tag['keyword'], 'item' => $tag_url],
+                ['@type' => 'ListItem', 'position' => 2, 'name' => $display_title, 'item' => $tag_url],
             ],
         ],
     ];
     render_page('tag.html.twig', [
         'tag' => $tag,
+        'display_title' => $display_title,
+        'display_summary' => $display_summary,
         'rows' => $rows,
+        'total' => $total,
+        'pagination' => pagination_data(false, $total, $p, $size, route_url('tag', ['kw' => $kw]), false, false),
         'siblings' => TopicTags::siblings((int)$tag['id'], (string)$tag['chain']),
-        'search_url' => route_url('search', ['q' => $kw]),
+        'search_url' => route_url('search', $is_zh ? ['q' => $kw] : []),
     ], $page_title, $seo);
 }
 /** /about：关于本站——组织实体的 E-E-A-T 落地页（FAQ 手写内容 + FAQPage 结构化数据），中英双语（词条在 app/i18n/） */
@@ -2759,6 +2801,26 @@ function sitemap_w3c(int $ts): string
     return date('Y-m-d\TH:i:sP', $ts);
 }
 
+/** 话题页的 sitemap 条目：中文始终在，其他语言只在译文已生成时才输出（否则该语言是 302，不能进 sitemap） */
+function sitemap_tag_urls(array $tag): array
+{
+    $kw = (string)$tag['keyword'];
+    $langs = enabled_langs();
+    if (!$langs) return [sitemap_url_xml(absolute_url(route_url('tag', ['kw' => $kw], DEFAULT_LANG)))];
+    $map = ['zh-CN' => absolute_url(route_url('tag', ['kw' => $kw], DEFAULT_LANG))];
+    foreach ($langs as $lang) {
+        if (Translator::content_for($lang, 'tag', (int)$tag['id']) !== null) {
+            $map[$lang] = absolute_url(route_url('tag', ['kw' => $kw], $lang));
+        }
+    }
+    $urls = [];
+    foreach ($map as $hreflang => $url) {
+        if ($hreflang === 'x-default') continue;
+        $urls[] = sitemap_url_xml($url, 0, $map);
+    }
+    return $urls;
+}
+
 /** sitemap 的 <url> 条目：lastmod 小于等于 0 时省略（协议允许省略） */
 function sitemap_url_xml(string $loc, int $lastmod = 0, array $alternates = []): string
 {
@@ -2843,7 +2905,7 @@ function sitemap_root_route(): void
     $urls = sitemap_page_urls();
     // 话题聚合页排在主题前面：它们是长尾搜索的主落地页，优先保证被分发
     foreach (TopicTags::active() as $tag) {
-        $urls[] = '<url><loc>' . h(absolute_url(route_url('tag', ['kw' => (string)$tag['keyword']], DEFAULT_LANG))) . '</loc></url>';
+        $urls = array_merge($urls, sitemap_tag_urls($tag));
     }
     $forum_ids = array_map(static fn(array $f): int => (int)$f['id'], sitemap_viewable_forums());
     // 协议单文件上限 5 万条：主题按 id 升序填满剩余额度，装不下的仍可经 /sitemap-topics-{n}.xml 单独提交
@@ -2864,10 +2926,10 @@ function sitemap_tags_route(): void
 {
     $urls = [];
     foreach (TopicTags::active() as $tag) {
-        $urls[] = '<url><loc>' . h(absolute_url(route_url('tag', ['kw' => (string)$tag['keyword']], DEFAULT_LANG))) . '</loc></url>';
+        $urls = array_merge($urls, sitemap_tag_urls($tag));
     }
     sitemap_xml_response('<?xml version="1.0" encoding="UTF-8"?>' . "\n"
-        . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n"
+        . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">' . "\n"
         . ($urls ? implode("\n", $urls) . "\n" : '') . '</urlset>' . "\n");
 }
 

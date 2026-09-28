@@ -4,9 +4,21 @@
     <div class="home-shell tag-page"><div class="forum-layout">
         <div class="forum-main"><div class="main-panel">
             <header class="list-heading tag-page-head">
-                <h1 class="list-title">{{ tag.keyword }}</h1>
-                {% if tag.summary %}<p class="list-sub">{{ tag.summary }}</p>{% endif %}
+                <h1 class="list-title">{{ display_title }}</h1>
+                {% if display_summary %}<p class="list-sub">{{ display_summary }}</p>{% endif %}
             </header>
+            {% set chain_intro = {
+                '回收收集': '旧衣从居民端进入回收体系的第一环：回收箱投放与清运、上门回收平台、衣物捐赠渠道，以及前端回收的计价方式与合规监管。',
+                '分拣批发': '回收后的旧衣服在这里变成商品：分拣分级、打包压缩、统货与等级货批发，货源组织与库存尾货流通都发生在这一环。',
+                '出口贸易': '分拣后的旧衣装柜出运：出口目的国结构、海关数据、装柜报价与贸易政策，构成旧衣出口商每天跟踪的核心变量。',
+                '进口市场': '二手服装到达目的国后的市场：各国的进口政策与关税、当地批发市场行情，以及进口禁令对全球贸易流向的重塑。',
+                '循环利用': '旧衣与废纺的再利用路径：再生纤维与化学回收技术、fiber-to-fiber 闭环、快时尚治理与可持续时尚的产业实践。',
+                '原料行情': '旧衣产业链的原料价格参考：羽绒分档报价、棉花期货走势，以及再生羽绒等循环原料的行情数据。',
+                '综合资讯': '跨环节的行业全景：二手交易平台财报、EPR 等政策立法、二手市场宏观数据与产业分析报道。',
+            }[tag.chain] ?? '' %}
+            {% if chain_intro %}
+                <div class="tag-chain-note"><strong>{{ tag.chain }}</strong>：{{ chain_intro|t }}</div>
+            {% endif %}
             {% if siblings %}
                 <div class="tag-strip tag-strip-page">
                     {% for kw in siblings %}
@@ -23,7 +35,8 @@
                     {% endfor %}
                 {% endif %}
             </ul>
-            {% if rows %}
+            {% if pagination %}<div class="pagination-bar">{{ pagination.kind == 'simple' ? ui.simple_pagination(pagination.has_prev, pagination.has_next, pagination.page, pagination.url, pagination.limited) : ui.pagination(pagination.total, pagination.page, pagination.size, pagination.url, pagination.limited, pagination.hidden|default([])) }}</div>{% endif %}
+            {% if rows and search_url %}
                 <p class="tag-more"><a href="{{ search_url }}" data-no-ajax="1">{{ '搜索更多相关内容'|t }}“{{ tag.keyword }}”</a></p>
             {% endif %}
         </div></div>

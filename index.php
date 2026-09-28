@@ -1559,6 +1559,9 @@ function page_common_data(string $title, array $seo = []): array
         'page_title' => $page_title,
         'flash' => $flash,
         'nav' => page_nav_data($site_name),
+        // 全站 footer：关于页入口 + 排位最前的话题词内链（话题聚合页的主内链来源之一）
+        'footer_tags' => TopicTags::hot(10),
+        'about_url' => route_url('about'),
         // hreflang 互补链接与 x-default（非中文访客默认英文版），只在可索引的公共页输出
         'lang_alternates' => lang_alternates(),
         // 自动语言跳转后、用户尚未做出选择时显示一次性的「切换到中文」提示条
@@ -1833,6 +1836,7 @@ function save_topic(): int
         create_topic_notifications($tid, $body, $author_id);
         return $tid;
     });
+    indexnow_submit_topic($tid);
     return $tid;
 }
 function save_reply(): array
@@ -2398,6 +2402,31 @@ function tag_page(): void
         'search_url' => route_url('search', ['q' => $kw]),
     ], (string)$tag['keyword'], $seo);
 }
+/** /about：关于本站——组织实体的 E-E-A-T 落地页（FAQ 手写内容 + FAQPage 结构化数据）。内容只做中文，非默认语言回中文页 */
+function about_page(): void
+{
+    if (current_lang() !== DEFAULT_LANG) go(route_url('about', [], DEFAULT_LANG));
+    $description = '全球旧衣资讯网是面向旧衣回收、分拣批发与二手服装出口贸易从业者的行业资讯与交流社区，汇总全球回收、出口与再生利用的行业动态与行情数据。';
+    $seo = page_seo('about', [], $description, '关于本站');
+    $faq = [
+        ['全球旧衣资讯网是什么？', '面向旧衣回收、二手服装批发与出口贸易从业者的行业资讯与交流社区，全站内容免费浏览，行业动态每日更新。'],
+        ['站内资讯内容从哪里来？', '行业动态等资讯版块的内容由编辑流程从全球行业媒体的公开报道聚合改写而来，每篇文末标注原文来源与发布时间；货源、原料等供需信息由行业用户自行发布。'],
+        ['如何发布供应或求购信息？', '注册账号后选择对应版块发帖即可。收费版块的联系方式对访客打码，注册登录后可见。'],
+        ['如何联系站点？', '可在行业动态版块发帖留言，编辑部会定期查看处理。'],
+    ];
+    $seo['jsonld'] = [
+        [
+            '@context' => 'https://schema.org',
+            '@type' => 'FAQPage',
+            'mainEntity' => array_map(static fn(array $qa): array => [
+                '@type' => 'Question',
+                'name' => $qa[0],
+                'acceptedAnswer' => ['@type' => 'Answer', 'text' => $qa[1]],
+            ], $faq),
+        ],
+    ];
+    render_page('about.html.twig', ['faq' => $faq, 'about_description' => $description], '关于本站', $seo);
+}
 function topic_page_replies(array $topic, int $page, int $size, int $offset, bool $reply_desc): array
 {
     $ctx = ['topic' => $topic, 'page' => $page, 'page_size' => $size, 'offset' => $offset, 'reply_order' => $reply_desc ? 1 : 0];
@@ -2442,6 +2471,8 @@ function topic_page_view(array $view): array
         'can_reply_forum' => $can_reply_forum,
         'can_reply' => can_speak() && $can_reply_forum,
         'current_uid' => uid(),
+        // 相关话题交叉内链只做中文（话题页本身 zh-only），英文页挂了也是死链中文词
+        'topic_tags' => current_lang() === DEFAULT_LANG ? TopicTags::for_topic_title((string)$t['title']) : [],
         'reply_status' => t(uid() ? (can_speak() ? ($can_reply_forum ? '说两句' : '无回帖权限') : '禁止发言') : '登录后回复'),
         'i18n_pending' => (bool)($i18n_pending ?? false),
     ];
@@ -2783,6 +2814,8 @@ function sitemap_xml_response(string $xml): never
 function sitemap_page_urls(): array
 {
     $urls = sitemap_page_url_langs('home');
+    // 关于页只有中文：以 zh URL 进 sitemap（同话题页口径）
+    $urls[] = '<url><loc>' . h(absolute_url(route_url('about', [], DEFAULT_LANG))) . '</loc></url>';
     $size = max(1, (int)setting('topics_per_page', '30'));
     $max_pages = max_pagination_pages();
     // 首页列表的第 1 页就是站点根，分页链接从第 2 页开始
@@ -2885,6 +2918,30 @@ function indexnow_key_route(): void
     echo setting('indexnow_key', '') . "\n";
     exit;
 }
+/** 新主题发布后把 URL 提交到 IndexNow（api.indexnow.org 会分发给 Bing/Yandex 等）。尽力而为：超时/失败静默，不影响发布 */
+function indexnow_submit_topic(int $topic_id): void
+{
+    $key = trim((string)setting('indexnow_key', ''));
+    if ($key === '' || $topic_id <= 0) return;
+    $payload = json_encode([
+        'host' => (string)parse_url(base_url(), PHP_URL_HOST),
+        'key' => $key,
+        'keyLocation' => absolute_url('seo-indexnow-key.txt'),
+        'urlList' => [absolute_url(route_url('topic', ['id' => $topic_id]))],
+    ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    $context = stream_context_create(['http' => [
+        'method' => 'POST',
+        'header' => "Content-Type: application/json; charset=utf-8\r\n",
+        'content' => $payload,
+        'timeout' => 2.0,
+        'ignore_errors' => true,
+    ]]);
+    try {
+        @file_get_contents('https://api.indexnow.org/indexnow', false, $context);
+    } catch (Throwable) {
+        // 加速收录通道，失败不需要兜底动作
+    }
+}
 /** /{神马验证码}[.html]：神马站长平台文件验证（平台要求下载的验证文件原样放根目录，这里按站点设置直接输出验证码） */
 function sm_verify_file_route(): void
 {
@@ -2914,6 +2971,7 @@ function llms_txt_route(): void
     $lines[] = '';
     $lines[] = t('## 使用说明');
     $lines[] = '- ' . t('主题页 URL 形如 ') . absolute_url(route_url('topic', ['id' => 1])) . t('（替换数字 id）');
+    $lines[] = '- ' . t('站点介绍（关于页）：') . absolute_url(route_url('about', [], DEFAULT_LANG));
     $lines[] = t('- 行情类主题包含当日价格数据（元/kg），引用时请注明发布日期');
     $lines[] = t('- 全站内容为服务端渲染，无需执行 JavaScript 即可读取');
     $lines[] = t('- 最新内容订阅源（RSS 2.0）：') . absolute_url(route_url('feed.xml'));
@@ -2998,6 +3056,7 @@ function core_routes(): array
         'forum' => 'forum_page',
         'topic' => 'topic_page',
         'tag' => 'tag_page',
+        'about' => 'about_page',
         'user' => 'user_page',
         'login' => 'login_page',
         'logout' => 'logout_route',

@@ -368,6 +368,8 @@ final class Mcp
             create_topic_notifications($tid, $body, $author_id);
             return $tid;
         });
+        // 管线经 MCP 发布的新帖同样走 IndexNow 快速收录（函数在 index.php）
+        indexnow_submit_topic($tid);
         return self::json_text(['topic_id' => $tid, 'url' => absolute_url(route_url('topic', ['id' => $tid])), 'message' => '主题已发表']);
     }
 

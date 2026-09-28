@@ -117,6 +117,24 @@ final class TopicTags
             ->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /** 全站 footer 用：排位最前的一组话题关键词 */
+    public static function hot(int $limit = 10): array
+    {
+        return array_slice(array_column(self::active(), 'keyword'), 0, max(1, $limit));
+    }
+
+    /** 主题页「相关话题」：标题里出现过的话题词（标题是最强的主题信号，正文匹配留待以后需要时再做） */
+    public static function for_topic_title(string $title, int $limit = 6): array
+    {
+        if (trim($title) === '') return [];
+        $hits = [];
+        foreach (self::active() as $row) {
+            if (mb_strpos($title, (string)$row['keyword']) !== false) $hits[] = (string)$row['keyword'];
+            if (count($hits) >= max(1, $limit)) break;
+        }
+        return $hits;
+    }
+
     /** 侧栏话题组：chain => 行列表（首页侧栏的「产业链话题」入口） */
     public static function chips(): array
     {

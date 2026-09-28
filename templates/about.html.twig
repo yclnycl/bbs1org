@@ -1,0 +1,24 @@
+{% extends 'layout.html.twig' %}
+{% block content %}
+    <div class="home-shell about-page"><div class="forum-layout">
+        <div class="forum-main"><div class="main-panel">
+            <header class="list-heading about-head">
+                <h1 class="list-title">{{ '关于本站'|t }}</h1>
+                <p class="list-sub">{{ about_description }}</p>
+            </header>
+            <div class="about-body">
+                <h2>{{ '本站做什么'|t }}</h2>
+                <p>{{ '全球旧衣资讯网聚焦旧衣回收与二手服装贸易产业链：从社区回收、分拣打包、统货批发，到非洲、东南亚等出口市场，再到废纺再生与羽绒、棉花等原料行情。'|t }}</p>
+                <p>{{ '站点由行业动态、政策法规、市场行情、回收环保、平台商业、技术工艺、出口信息七个资讯版块，以及货源市场、旧衣原料、鞋子统货、精品单件、出口专区、行业服务、周边市场七个供需版块组成。'|t }}</p>
+                <h2>{{ '内容从哪里来'|t }}</h2>
+                <p>{{ '资讯版块的内容由编辑流程从全球行业媒体的公开报道聚合改写而来，每篇文末标注原文来源与发布时间；供需信息由行业用户自行发布，联系方式按版块规则对访客打码。'|t }}</p>
+                <p>{{ '如果你发现内容与事实不符或有侵权问题，欢迎在行业动态版块留言反馈，我们会尽快核实处理。'|t }}</p>
+                <h2>{{ '常见问题'|t }}</h2>
+                {% for qa in faq %}
+                    <h3 class="about-faq-q">{{ qa[0] }}</h3>
+                    <p class="about-faq-a">{{ qa[1] }}</p>
+                {% endfor %}
+            </div>
+        </div></div>
+    </div></div>
+{% endblock %}

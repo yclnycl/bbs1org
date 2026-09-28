@@ -156,6 +156,12 @@ return [
     '产业链话题' => 'Industry topics',
     '暂无相关主题，去论坛发一条吧' => 'No related topics yet — start one on the forum',
     '搜索更多相关内容' => 'Search for more about ',
+    '相关话题' => 'Related topics',
+
+    // 全站页脚
+    '全球旧衣行业资讯与交流社区' => 'Global used-clothing industry news and community',
+    '页脚导航' => 'Footer',
+    '关于本站' => 'About',
 
     // 联系方式打码弹窗（前端从 body data 属性读取）
     '添加微信' => 'Add on WeChat',

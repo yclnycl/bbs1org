@@ -47,7 +47,17 @@
 <main class="wrap" id="main">
     {% block content %}{% endblock %}
 </main>
-<footer class="footer"></footer>
+<footer class="footer">
+    <div class="footer-inner">
+        <p class="footer-brand">{{ site_name }} · {{ '全球旧衣行业资讯与交流社区'|t }}</p>
+        <nav class="footer-links" aria-label="{{ '页脚导航'|t }}">
+            <a href="{{ about_url }}">{{ '关于本站'|t }}</a>
+            {% for tg in footer_tags %}
+                <a href="{{ route_url('tag', {kw: tg}) }}">{{ tg }}</a>
+            {% endfor %}
+        </nav>
+    </div>
+</footer>
 <div class="modal-backdrop" id="notify-modal" hidden>
     <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="notify-modal-title">
         <div class="modal-head"><strong id="notify-modal-title">提示</strong><button type="button" class="modal-close" data-modal-close aria-label="关闭">×</button></div>

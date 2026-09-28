@@ -2274,6 +2274,14 @@ function indexnow_key_route(): void
     echo setting('indexnow_key', '') . "\n";
     exit;
 }
+/** /{神马验证码}[.html]：神马站长平台文件验证（平台要求下载的验证文件原样放根目录，这里按站点设置直接输出验证码） */
+function sm_verify_file_route(): void
+{
+    header('Content-Type: text/html; charset=UTF-8');
+    header('Cache-Control: no-cache');
+    echo setting('sm_verification', '');
+    exit;
+}
 /** /llms.txt：面向 AI 系统的站点说明（llmstxt.org 社区规范；Google 声明不用于搜索排名，供其他 AI 系统选用） */
 function llms_txt_route(): void
 {
@@ -2339,6 +2347,8 @@ try {
     if ($handler !== null) $handler();
     // 主题分片文件名带序号（/sitemap-topics-2.xml），无法静态注册进 core_routes()
     elseif (preg_match('/^sitemap-topics-(\d+)\.xml$/D', $route, $m)) sitemap_topics_route((int)$m[1]);
+    // 神马文件验证的路径带验证码本身（/{验证码} 或 /{验证码}.html），同样无法静态注册
+    elseif (($code = setting('sm_verification', '')) !== '' && preg_match('/^' . preg_quote($code, '/') . '(?:\.html?)?$/D', $route)) sm_verify_file_route();
     else err('你访问的页面不存在', 404);
 } catch (Throwable $e) {
     debug_log_write('未捕获异常', $e);

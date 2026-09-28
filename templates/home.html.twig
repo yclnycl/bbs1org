@@ -46,7 +46,7 @@
                     {% endfor %}
                 {% endif %}
             </ul>
-            {% if pagination %}<div class="pagination-bar">{{ pagination.kind == 'simple' ? ui.simple_pagination(pagination.has_prev, pagination.has_next, pagination.page, pagination.url, pagination.limited) : ui.pagination(pagination.total, pagination.page, pagination.size, pagination.url, pagination.limited) }}</div>{% endif %}
+            {% if pagination %}<div class="pagination-bar">{{ pagination.kind == 'simple' ? ui.simple_pagination(pagination.has_prev, pagination.has_next, pagination.page, pagination.url, pagination.limited) : ui.pagination(pagination.total, pagination.page, pagination.size, pagination.url, pagination.limited, pagination.hidden|default([])) }}</div>{% endif %}
         </div></div>
         <aside class="sidebar">{{ ui.user_card(sidebar_user, false, fid) }}</aside>
     </div></div>

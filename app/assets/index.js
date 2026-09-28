@@ -633,3 +633,73 @@ document.addEventListener("reset", event => {
 });
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mdInitEditors);
 else mdInitEditors();
+/* --- 移动端体验：返回顶部 + 列表无限滚动（窄屏 ≤720px 生效，PC 保留手动分页） --- */
+const backToTop = document.getElementById("back-to-top");
+if (backToTop) {
+    const toggleBackToTop = () => { backToTop.hidden = window.scrollY < 240; };
+    window.addEventListener("scroll", toggleBackToTop, {passive: true});
+    backToTop.addEventListener("click", () => window.scrollTo({top: 0, behavior: "smooth"}));
+    toggleBackToTop();
+}
+const initInfiniteScroll = () => {
+    const list = document.querySelector(".main-panel .post-list");
+    let bar = document.querySelector(".pagination-bar");
+    // 搜索结果的「下一页」是 POST 表单按钮，翻页里没有下一页链接时（如搜索页）自然不启用
+    if (!bar || !list || !window.matchMedia("(max-width: 720px)").matches || !("IntersectionObserver" in window)) return;
+    const nextHref = () => {
+        const link = Array.from(bar.querySelectorAll("a")).find(a => a.textContent.trim() === "下一页");
+        return link ? link.getAttribute("href") : null;
+    };
+    if (!nextHref()) return;
+    const status = document.createElement("div");
+    status.className = "infinite-status";
+    status.textContent = "上拉加载更多";
+    bar.after(status);
+    let loading = false;
+    const markEnd = () => { status.textContent = "已经到底了"; status.removeAttribute("data-retry"); observer.disconnect(); };
+    const loadNext = async () => {
+        const href = nextHref();
+        if (loading) return;
+        if (!href) { markEnd(); return; }
+        loading = true;
+        status.textContent = "正在加载…";
+        status.removeAttribute("data-retry");
+        try {
+            const response = await fetch(href, {credentials: "same-origin"});
+            if (!response.ok) throw new Error();
+            const doc = new DOMParser().parseFromString(await response.text(), "text/html");
+            const freshBar = doc.querySelector(".pagination-bar");
+            // 空态行不追加：下一页如果已经没有数据，直接按到底处理
+            const incoming = Array.from(doc.querySelectorAll(".main-panel .post-list > li")).filter(li => !li.classList.contains("empty-state"));
+            if (!incoming.length || !freshBar) throw new Error();
+            list.append(...incoming);
+            bar.replaceWith(freshBar);
+            bar = freshBar;
+            bar.after(status);
+            // 地址栏同步到已加载的页码，刷新后仍停留在当前位置
+            history.replaceState(null, "", href);
+            if (!nextHref()) {
+                markEnd();
+            } else {
+                status.textContent = "上拉加载更多";
+                // 追加后状态条可能仍在触发区（内容不足一屏），手动补一次加载
+                if (status.getBoundingClientRect().top < window.innerHeight + 480) {
+                    loading = false;
+                    loadNext();
+                    return;
+                }
+            }
+        } catch (_) {
+            status.textContent = "加载失败，点击重试";
+            status.dataset.retry = "1";
+        }
+        loading = false;
+    };
+    status.addEventListener("click", () => { if (status.dataset.retry === "1") loadNext(); });
+    const observer = new IntersectionObserver(entries => {
+        if (entries.some(entry => entry.isIntersecting)) loadNext();
+    }, {rootMargin: "480px 0px"});
+    observer.observe(status);
+};
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initInfiniteScroll);
+else initInfiniteScroll();

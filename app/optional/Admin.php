@@ -28,10 +28,13 @@ final class Admin
         $gid = max(1, (int)($_POST['default_group_id'] ?? 2));
         if (!group_by_id($gid)) err('默认用户组不存在');
         $values = ['site_name' => $site_name, 'site_base_url' => clean_site_base_url((string)($_POST['site_base_url'] ?? '')), 'pinned_topic_ids' => preg_replace('/[^\d,]/', '', (string)($_POST['pinned_topic_ids'] ?? '')) ?: '', 'default_group_id' => (string)$gid];
+        // Logo 只接受站内绝对路径或 http(s) 外链，其余一律当没填，避免把任意字符串塞进 <img src>
+        $site_logo = trim((string)($_POST['site_logo'] ?? ''));
+        $values['site_logo'] = preg_match('~^(https?://|/)~i', $site_logo) === 1 ? cut($site_logo, DB_STRING_MAX_LENGTH) : '';
         foreach (['site_name_title', 'site_keywords'] as $key) $values[$key] = post($key, DB_STRING_MAX_LENGTH);
         $values['site_description'] = post('site_description', DB_TEXT_MAX_LENGTH);
         foreach (['site_closed', 'debug_mode', 'allow_register'] as $key) $values[$key] = isset($_POST[$key]) ? '1' : '0';
-        foreach (['pc_nav_forum_count' => [0, 20, 6], 'topics_per_page' => [1, 200, 30], 'replies_per_page' => [1, 200, 50], 'max_pagination_pages' => [1, 1000, 50], 'post_interval_seconds' => [0, 3600, 5]] as $key => [$min, $max, $default]) $values[$key] = (string)min($max, max($min, (int)($_POST[$key] ?? $default)));
+        foreach (['pc_nav_forum_count' => [0, 20, 6], 'topics_per_page' => [1, 200, 30], 'replies_per_page' => [1, 200, 50], 'max_pagination_pages' => [1, 1000, 1000], 'post_interval_seconds' => [0, 3600, 5]] as $key => [$min, $max, $default]) $values[$key] = (string)min($max, max($min, (int)($_POST[$key] ?? $default)));
         $length_fields = [
             'username' => [1, DB_STRING_MAX_LENGTH, DB_STRING_MAX_LENGTH], 'email' => [0, DB_STRING_MAX_LENGTH, DB_STRING_MAX_LENGTH],
             'bio' => [0, DB_TEXT_MAX_LENGTH, DB_TEXT_MAX_LENGTH], 'search' => [2, DB_STRING_MAX_LENGTH, DB_STRING_MAX_LENGTH],
@@ -117,11 +120,12 @@ final class Admin
         $fields = [
             'site_name' => ['label' => '网站名', 'required' => true],
             'site_name_title' => ['label' => '网站名title', 'help' => '为空时使用网站名。'],
+            'site_logo' => ['label' => '论坛 Logo', 'type' => 'url', 'help' => '顶部导航品牌位的图片地址，填 https:// 外链或 / 开头的站内绝对路径；留空使用默认标志，同时用于搜索引擎结构化数据的站点 Logo。'],
             'site_base_url' => ['label' => '网站固定地址', 'type' => 'url', 'help' => '填写以 https:// 开头的网站域名。'],
             'site_keywords' => ['label' => '关键字'], 'site_description' => ['label' => '网站介绍', 'type' => 'textarea'],
             'pinned_topic_ids' => ['label' => '置顶主题ID'], 'pc_nav_forum_count' => ['label' => 'PC顶部版块数量', 'type' => 'number', 'min' => 0, 'max' => 20, 'help' => 'PC端顶部默认展示的版块数量，默认6个；设为0仅显示“全部版块”。'],
             'topics_per_page' => ['label' => '列表单页数量', 'type' => 'number', 'min' => 1, 'max' => 200], 'replies_per_page' => ['label' => '回帖单页数量', 'type' => 'number', 'min' => 1, 'max' => 200],
-            'max_pagination_pages' => ['label' => '最大分页数', 'type' => 'number', 'min' => 1, 'max' => 1000, 'help' => '限制除主题回帖外的所有分页，默认50。'],
+            'max_pagination_pages' => ['label' => '最大分页数', 'type' => 'number', 'min' => 1, 'max' => 1000, 'help' => '限制除主题回帖外的所有分页，默认1000，超出部分可在页码直达里输入页码访问。'],
             'username_min_length' => ['label' => '用户名最小长度', 'type' => 'number', 'min' => 0, 'max' => DB_STRING_MAX_LENGTH], 'username_max_length' => ['label' => '用户名最大长度', 'type' => 'number', 'min' => 1, 'max' => DB_STRING_MAX_LENGTH],
             'email_min_length' => ['label' => '邮箱最小长度', 'type' => 'number', 'min' => 0, 'max' => DB_STRING_MAX_LENGTH], 'email_max_length' => ['label' => '邮箱最大长度', 'type' => 'number', 'min' => 0, 'max' => DB_STRING_MAX_LENGTH],
             'bio_min_length' => ['label' => '个人简介最小长度', 'type' => 'number', 'min' => 0, 'max' => DB_TEXT_MAX_LENGTH], 'bio_max_length' => ['label' => '个人简介最大长度', 'type' => 'number', 'min' => 0, 'max' => DB_TEXT_MAX_LENGTH],

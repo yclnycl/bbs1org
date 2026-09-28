@@ -195,12 +195,13 @@ function default_settings(): array
 {
     return [
         'site_name' => 'FORUM',
+        'site_logo' => '',
         'allow_register' => '1',
         'default_group_id' => '2',
         'pc_nav_forum_count' => '6',
         'topics_per_page' => '30',
         'replies_per_page' => '50',
-        'max_pagination_pages' => '50',
+        'max_pagination_pages' => '1000',
         'username_min_length' => '2', 'username_max_length' => '20',
         'email_min_length' => '7', 'email_max_length' => '150',
         'bio_min_length' => '0', 'bio_max_length' => '10000',
@@ -913,13 +914,15 @@ function mask_topic_contacts(array $t): array
 function ensure_schema_bumps(): void
 {
     static $done = false;
-    if ($done || (int)setting('schema_bumps', '0') >= 2) return;
+    if ($done || (int)setting('schema_bumps', '0') >= 3) return;
     $done = true;
     $db = db();
     $cols = array_column($db->query('PRAGMA table_info(app_forums)')->fetchAll(PDO::FETCH_ASSOC), 'name');
     if (!in_array('paid_mode', $cols, true)) $db->exec('ALTER TABLE app_forums ADD COLUMN paid_mode INTEGER NOT NULL DEFAULT 0');
     if (!in_array('parent_id', $cols, true)) $db->exec('ALTER TABLE app_forums ADD COLUMN parent_id INTEGER NOT NULL DEFAULT 0');
-    save_settings_values(['schema_bumps' => '2']);
+    // bump 3：旧部署把早期默认值 50 落了库，导致列表只能翻到 50 页；仍停留在 50 的按新默认值放开
+    if (setting('max_pagination_pages', '') === '50') save_settings_values(['max_pagination_pages' => '1000']);
+    save_settings_values(['schema_bumps' => '3']);
 }
 /** 二级分类：子版块 ID 清单（版块层级固定两层） */
 function forum_child_ids(int $fid, bool $viewable_only = false): array
@@ -970,7 +973,7 @@ function canonical_host_redirect(): void
 }
 function max_pagination_pages(): int
 {
-    return min(1000, max(1, (int)setting('max_pagination_pages', '50')));
+    return min(1000, max(1, (int)setting('max_pagination_pages', '1000')));
 }
 function limit_pagination_request_pages(): void
 {
@@ -1094,7 +1097,18 @@ function pagination_data(bool $simple, int $total, int $page, int $size, string 
     $pages = max(1, (int)ceil($total / $size));
     if ($limited) $pages = min($pages, max_pagination_pages());
     if ($pages <= 1) return null;
-    return ['kind' => 'full', 'total' => $total, 'page' => $page, 'size' => $size, 'url' => $url, 'limited' => $limited];
+    return ['kind' => 'full', 'total' => $total, 'page' => $page, 'size' => $size, 'url' => $url, 'limited' => $limited, 'hidden' => pagination_hidden_fields($url)];
+}
+/** 页码直达 GET 表单的隐藏域：GET 提交会整体替换 query，要把 p 以外的现有参数原样带上，跳转才不丢 sort/tab 等状态 */
+function pagination_hidden_fields(string $url): array
+{
+    $query = (string)(parse_url($url, PHP_URL_QUERY) ?? '');
+    if ($query === '') return [];
+    parse_str($query, $params);
+    unset($params['p']);
+    $fields = [];
+    foreach ($params as $key => $value) $fields[(string)$key] = is_array($value) ? implode(',', array_map('strval', $value)) : (string)$value;
+    return $fields;
 }
 function post_forum_options(): array
 {
@@ -1219,8 +1233,11 @@ function page_nav_data(string $site_name): array
             }
         }
     }
+    // 论坛 Logo：后台填了图片地址就替换品牌位默认标志，这里归一成绝对地址供模板直接输出
+    $site_logo = trim((string)setting('site_logo', ''));
     return [
         'site_name' => $site_name,
+        'site_logo' => $site_logo !== '' ? absolute_url($site_logo) : '',
         'active_forum' => $active_forum,
         'mine' => $mine,
         'mine_unread' => $mine ? (int)($mine['unread_notifications'] ?? 0) : 0,
@@ -1253,13 +1270,14 @@ function page_common_data(string $title, array $seo = []): array
     if ($flash !== '' && !headers_sent()) app_cookie('__flash', '', time() - 3600, true, false);
     // 全站结构化数据：Organization 每页都有，WebSite（含搜索动作）走 @id 引用
     $base = rtrim(base_url(), '/');
+    $site_logo = trim((string)($settings['site_logo'] ?? ''));
     $jsonld = [[
         '@context' => 'https://schema.org',
         '@type' => 'Organization',
         '@id' => $base . '/#organization',
         'name' => $site_name,
         'url' => $base . '/',
-        'logo' => absolute_url(asset_url('app/assets/index.svg')),
+        'logo' => $site_logo !== '' ? absolute_url($site_logo) : absolute_url(asset_url('app/assets/index.svg')),
     ]];
     $jsonld[] = [
         '@context' => 'https://schema.org',
@@ -1984,7 +2002,7 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
             && !Topic::where('user_id', $profile_uid)->exists()
             && !Reply::where('user_id', $profile_uid)->exists();
     } elseif ($filter_forum) {
-        $seo = page_seo('forum', ['id' => $fid], trim((string)$filter_forum['description']) !== ''
+        $seo = page_seo('forum', ['id' => $fid] + ($p > 1 ? ['p' => $p] : []), trim((string)$filter_forum['description']) !== ''
             ? (string)$filter_forum['description']
             : '「' . $filter_forum['name'] . '」版块的最新主题与讨论——' . $brand);
         $forum_url = absolute_url(route_url('forum', ['id' => $fid]));
@@ -2008,7 +2026,8 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
             ],
         ];
     } else {
-        $seo = page_seo('home', [], $brand . '：' . default_site_description());
+        // 列表分页的 canonical 指到自身（带 p），sitemap 里的分页链接才不会被归并到第 1 页
+        $seo = page_seo('home', $p > 1 ? ['p' => $p] : [], $brand . '：' . default_site_description());
     }
     $search_query = $q !== '' ? 'q=' . rawurlencode($q) . '&field=' . $search_field . '&' : '';
     $tab_items = ['comment' => ['label' => '新评论', 'href' => $url($search_query . 'sort=comment')], 'post' => ['label' => '新帖子', 'href' => $url($search_query . 'sort=post')]];
@@ -2388,13 +2407,24 @@ function sitemap_xml_response(string $xml): never
     exit;
 }
 
-/** 首页 + 游客可见版块列表页的 <url> 条目，lastmod 取该版块最新回帖时间 */
+/** 首页 + 游客可见版块列表页（含分页页）的 <url> 条目。切页大小与前台一致（topics_per_page），
+ * 页数同样受最大分页数约束——超出上限的页码会被前台钳到最后一页，生成链接只会产出重复内容 */
 function sitemap_page_urls(): array
 {
     $urls = [sitemap_url_xml(absolute_url(app_url()))];
+    $size = max(1, (int)setting('topics_per_page', '30'));
+    $max_pages = max_pagination_pages();
+    // 首页列表的第 1 页就是站点根，分页链接从第 2 页开始
+    $home_pages = min($max_pages, (int)ceil(Topic::count() / $size));
+    for ($p = 2; $p <= $home_pages; $p++) $urls[] = sitemap_url_xml(absolute_url(route_url('home', ['p' => $p])));
     foreach (sitemap_viewable_forums() as $f) {
         $fid = (int)$f['id'];
-        $urls[] = sitemap_url_xml(absolute_url(route_url('forum', ['id' => $fid])), (int)Topic::where('forum_id', $fid)->max('last_reply_at'));
+        $lastmod = (int)Topic::where('forum_id', $fid)->max('last_reply_at');
+        $urls[] = sitemap_url_xml(absolute_url(route_url('forum', ['id' => $fid])), $lastmod);
+        // 与列表页同口径：一级版块聚合可见子分类的主题后再切页
+        $total = Topic::whereIn('forum_id', array_merge([$fid], forum_child_ids($fid, true)))->count();
+        $pages = min($max_pages, (int)ceil($total / $size));
+        for ($p = 2; $p <= $pages; $p++) $urls[] = sitemap_url_xml(absolute_url(route_url('forum', ['id' => $fid, 'p' => $p])), $lastmod);
     }
     return $urls;
 }
@@ -2417,7 +2447,7 @@ function sitemap_root_route(): void
         . implode("\n", $urls) . "\n</urlset>\n");
 }
 
-/** /sitemap-pages.xml：首页 + 游客可见版块列表页，lastmod 取该版块最新回帖时间 */
+/** /sitemap-pages.xml：首页 + 游客可见版块列表页（含分页页），lastmod 取该版块最新回帖时间 */
 function sitemap_pages_route(): void
 {
     $urls = sitemap_page_urls();

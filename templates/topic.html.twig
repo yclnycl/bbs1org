@@ -22,7 +22,7 @@
                     <li class="empty-state">暂无回复</li>
                 {% endif %}
             </ul>
-            {% if pagination %}<div class="pagination-bar">{{ pagination.kind == 'simple' ? ui.simple_pagination(pagination.has_prev, pagination.has_next, pagination.page, pagination.url, pagination.limited) : ui.pagination(pagination.total, pagination.page, pagination.size, pagination.url, pagination.limited) }}</div>{% endif %}
+            {% if pagination %}<div class="pagination-bar">{{ pagination.kind == 'simple' ? ui.simple_pagination(pagination.has_prev, pagination.has_next, pagination.page, pagination.url, pagination.limited) : ui.pagination(pagination.total, pagination.page, pagination.size, pagination.url, pagination.limited, pagination.hidden|default([])) }}</div>{% endif %}
             <div class="reply-panel" id="reply">
                 <div class="reply-panel-head"><h3>发表回复</h3><span class="reply-status">{{ reply_status }}</span></div>
                 {% if can_reply %}

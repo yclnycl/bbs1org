@@ -13,7 +13,8 @@
 - 帖子正文按 Markdown 渲染（league/commonmark：标题、表格、列表、引用、代码块、删除线、裸链接自动识别，`@用户名` 与 `@用户名 #楼层` 自动变成提及链接），发帖与回帖使用 EasyMDE 编辑器（工具栏 + 预览，预览结果由后端同一渲染函数生成）
 - 无安装向导，首次访问按环境变量自动初始化，适配 Docker 一键部署
 - 站点设置、版块和用户组在请求内按需加载，数据库结构简单
-- 支持 AJAX 交互和响应式布局，兼顾 PC 与移动端使用体验
+- 支持 AJAX 交互和响应式布局，兼顾 PC 与移动端使用体验；移动端列表自动无限滚动并带返回顶部按钮
+- 后台可设置论坛 Logo（顶部品牌位与搜索引擎结构化数据），PC 分页提供页码直达
 
 ## 环境
 
@@ -227,11 +228,11 @@ TURNSTILE_HOSTNAMES=localhost,127.0.0.1     # 线上填 cncttc.com,www.cncttc.co
 面向搜索引擎的机器接口随站点自动提供，无需配置：
 
 - `/sitemap.xml`：sitemap 索引，指向页面清单与主题清单分片
-- `/sitemap-pages.xml`：首页与各版块列表页，`<lastmod>` 取该版块最新回帖时间
+- `/sitemap-pages.xml`：首页与各版块列表页（含按「列表单页数量」切出的分页页，页数同样受「最大分页数」约束），`<lastmod>` 取该版块最新回帖时间
 - `/sitemap-topics-{n}.xml`：主题页清单，按 id 升序每 10000 条一个分片文件，`<lastmod>` 随最新回帖更新
 - `/robots.txt`：全站禁止抓取后台、登录注册、编辑与表单页，并声明 sitemap 位置
 
-sitemap 只收录**游客可见**的版块与主题：版块的用户组浏览限制（`allow_view_groups`）把游客挡在外面时，该版块及其主题不会进入 sitemap。Google Search Console、Bing Webmaster、百度搜索资源平台、360 与搜狗站长平台均支持标准 sitemap 协议，直接提交 `/sitemap.xml` 即可。
+sitemap 只收录**游客可见**的版块与主题：版块的用户组浏览限制（`allow_view_groups`）把游客挡在外面时，该版块及其主题不会进入 sitemap。列表分页页的 canonical 指向带 `p` 的自身地址，保证分页链接可被单独收录。Google Search Console、Bing Webmaster、百度搜索资源平台、360 与搜狗站长平台均支持标准 sitemap 协议，直接提交 `/sitemap.xml` 即可。
 
 ## 数据层
 

@@ -43,5 +43,5 @@
             <tr><td colspan="7">暂无调用记录</td></tr>
         {% endfor %}
     </table>
-    {% if pagination %}<div class="pagination-bar">{{ ui.pagination(pagination.total, pagination.page, pagination.size, pagination.url, pagination.limited) }}</div>{% endif %}
+    {% if pagination %}<div class="pagination-bar">{{ ui.pagination(pagination.total, pagination.page, pagination.size, pagination.url, pagination.limited, pagination.hidden|default([])) }}</div>{% endif %}
 {% endblock %}

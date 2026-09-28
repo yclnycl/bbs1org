@@ -3,7 +3,7 @@
 <div class="top">
     <div class="bar">
         <div class="bar-left">
-            <a class="brand" href="{{ route_url('home') }}">{{ nav.site_name }}</a>
+            <a class="brand{{ nav.site_logo != '' ? ' brand-logo-custom' : '' }}" href="{{ route_url('home') }}">{% if nav.site_logo != '' %}<img class="brand-logo" src="{{ nav.site_logo }}" alt="{{ nav.site_name }}">{% endif %}<span class="brand-text">{{ nav.site_name }}</span></a>
             <nav class="forum-nav" aria-label="顶部版块">
                 {% for f in nav.visible_forums %}
                     <a class="forum-link{{ f.id == active_forum ? ' active' : '' }}" href="{{ route_url('forum', {id: f.id}) }}">{{ f.name }}</a>

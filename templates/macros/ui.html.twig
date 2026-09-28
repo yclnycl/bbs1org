@@ -131,7 +131,7 @@
 <li class="post-item notification-item{{ unread ? ' unread' : '' }}"><div class="post-avatar">{{ _self.avatar_link(sender_id ?: 0, sender_name)|raw }}</div><div class="post-body"><div class="post-title-row notification-head">{{ sender_title|raw }}<span class="post-user-group notification-kind">{{ kind }}</span>{% if unread %}<span class="notification-unread">未读</span>{% endif %}</div><div class="post-meta"><span>{{ human_time(n.created_at) }}</span></div><div class="post-content notification-content">{{ n|notification_content }}</div></div></li>
 {%- endmacro %}
 
-{% macro pagination(total, page, size, url, limited) %}
+{% macro pagination(total, page, size, url, limited, hidden = []) %}
 {%- set lim = limited is null ? true : limited -%}
 {%- set pages = max(1, (total / size)|round(0, 'ceil')) -%}
 {%- if lim %}{% set pages = min(pages, max_pagination_pages()) %}{% endif -%}
@@ -139,6 +139,11 @@
 {%- set page = max(1, min(page, pages)) -%}
 {%- set start = max(1, page - 2) -%}
 {%- set end = min(pages, page + 2) -%}
+{# 页码直达：GET 表单会把 query 整体替换，隐藏域带上 p 以外的现有参数，无 JS 也能跳转不丢状态 #}
+{%- set jump_hidden = '' -%}
+{%- for key, value in hidden -%}
+    {%- set jump_hidden = jump_hidden ~ '<input type="hidden" name="' ~ key|e ~ '" value="' ~ value|e ~ '">' -%}
+{%- endfor -%}
 {%- set h = '<div class="pagination"><ul>' -%}
 {%- if page > 1 %}{% set h = h ~ '<li><a href="' ~ append_url_query(url, {p: page - 1})|e ~ '">上一页</a></li>' %}{% endif -%}
 {%- if start > 1 -%}
@@ -153,6 +158,7 @@
 {%- set h = h ~ '<li><a href="' ~ append_url_query(url, {p: pages})|e ~ '">' ~ pages ~ '</a></li>' -%}
 {%- endif -%}
 {%- if page < pages %}{% set h = h ~ '<li><a href="' ~ append_url_query(url, {p: page + 1})|e ~ '">下一页</a></li>' %}{% endif -%}
+{%- set h = h ~ '<li class="pagination-jump"><form method="get" action="' ~ (url|split('?', 2))[0]|e ~ '">' ~ jump_hidden|raw ~ '<span class="pagination-jump-text">跳至</span><input class="pagination-jump-input" type="number" name="p" min="1" max="' ~ pages ~ '" value="' ~ page ~ '" aria-label="页码"><span class="pagination-jump-text">页</span><button type="submit">跳转</button></form></li>' -%}
 {{- (h ~ '</ul></div>')|raw -}}
 {%- endif -%}
 {% endmacro %}

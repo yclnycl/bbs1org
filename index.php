@@ -885,16 +885,17 @@ function mask_contacts(string $text): string
     $text = preg_replace('/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/u', '******', $text) ?? $text;
     // 带引导词的号码（含 +86 国际格式等变体）
     $text = preg_replace('/(电话|手机|手机号|联系方式|致电|热线|tel)\s*[:：]?\s*\+?\d[\d\s-]{6,17}\d/iu', '$1：******', $text) ?? $text;
-    // 手机号：11 位连写与 3-4-4 分隔写法
-    $text = preg_replace('/(?<!\d)1[3-9]\d{9}(?!\d)/u', '******', $text) ?? $text;
-    $text = preg_replace('/(?<!\d)1[3-9]\d[- ]\d{4}[- ]\d{4}(?!\d)/u', '******', $text) ?? $text;
-    // 座机（区号-号码）与 400/800 热线
-    $text = preg_replace('/(?<!\d)(?:0\d{2,3}|[48]00)[- ]?\d{7,8}(?!\d)/u', '******', $text) ?? $text;
+    // 手机号：11 位任意位置加分隔符都能盖住（连写/3-4-4/奇数分段/0 前缀/12 位变体/+86 前缀）
+    $text = preg_replace('/(?<!\d)(?:\+?86[\s\-]?)?0?1[3-9](?:[\s\-]?\d){9,11}(?!\d)/u', '******', $text) ?? $text;
+    // 座机（区号-号码，本地段允许 6 位）与 400/800 热线
+    $text = preg_replace('/(?<!\d)(?:0\d{2,3}|[48]00)[- ]?\d{6,8}(?!\d)/u', '******', $text) ?? $text;
     $text = preg_replace('/(?<!\d)[48]00[- ]\d{3}[- ]\d{4}(?!\d)/u', '******', $text) ?? $text;
     // 微信号：前缀引导 + 6-20 位字母开头的 ID
     $text = preg_replace('/(微信号?|weixin|wx|vx|v信)\s*[:：#]?\s*[a-zA-Z][a-zA-Z0-9_-]{5,19}/iu', '$1：******', $text) ?? $text;
-    // QQ 号
-    $text = preg_replace('/(扣扣|qq)\s*[:：#]?\s*\d{5,11}/iu', '$1：******', $text) ?? $text;
+    // QQ/蝙蝠：前导字母允许空格/全角/单个 Q，与号值之间允许短括号说明（"QQ（第三方验证）：785095888"），号值允许空格分段
+    $text = preg_replace('/(扣扣|蝙蝠|[qｑ][\s\-]?[qｑ]?)(\s*(?:（[^）\n]{1,16}）)?\s*[:：#]\s*)\s*[+\d][\d\s\-]{3,13}\d/iu', '$1$2******', $text) ?? $text;
+    // WhatsApp/Telegram 等境外号码：保留软件名，号码整段打码（含 + 国际区号）
+    $text = preg_replace('/((?:whats\s?app|telegram|wa\.me|t\.me)[^\d+]{0,3})\+?\d[\d\s\-.]{4,}\d/iu', '$1：******', $text) ?? $text;
     return $text;
 }
 function forum_paid_mode(int $forum_id): bool
@@ -2535,7 +2536,7 @@ function llms_txt_route(): void
     echo implode("\n", $lines) . "\n";
     exit;
 }
-/** /feed.xml：RSS 2.0 订阅源，取游客可见版块最新 30 篇主题（订阅器与聚合端发现更新的常规通道） */
+/** /feed.xml：RSS 2.0 订阅源，取游客可见版块最新 feed_size 篇主题（订阅器与聚合端发现更新的常规通道；全量发现走 sitemap） */
 function feed_route(): void
 {
     $settings = settings_cache();
@@ -2544,11 +2545,12 @@ function feed_route(): void
     $viewable = sitemap_viewable_forums();
     $forum_ids = array_map(static fn(array $f): int => (int)$f['id'], $viewable);
     $forum_names = array_column($viewable, 'name', 'id');
+    $size = max(1, min(500, (int)setting('feed_size', '50')));
     $items = '';
     $last_build = 0;
     if ($forum_ids) {
         $rows = Topic::whereIn('forum_id', $forum_ids)->orderByDesc('created_at')->orderByDesc('id')
-            ->limit(30)->get(['id', 'title', 'body', 'created_at', 'forum_id']);
+            ->limit($size)->get(['id', 'title', 'body', 'created_at', 'forum_id']);
         foreach ($rows as $t) {
             $fid = (int)$t->forum_id;
             $title = (string)$t->title;

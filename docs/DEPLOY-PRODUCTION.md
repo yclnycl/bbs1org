@@ -48,8 +48,14 @@ bbs1org-permissions-1  serversideup/php:8.5-fpm  一次性 chown 后退出
 
 ### 宿主 nginx（`/etc/nginx/sites-available/cncttc.com`）
 
-80 端口只做 ACME 验证与 301；443 反代到 `127.0.0.1:8080`，带 HSTS、`client_max_body_size 128m`、
-`X-Forwarded-Proto`（应用靠它决定 cookie 是否加 Secure）。
+80 端口保留 ACME 验证路径，其余请求**直出内容（反代到 `127.0.0.1:8080`）而不是 301 跳 HTTPS**；
+443 同样反代到 `127.0.0.1:8080`，带 HSTS、`client_max_body_size 128m`、`X-Forwarded-Proto`
+（应用靠它决定 cookie 是否加 Secure）。
+
+> 2026-09-28 起 80 端口不再 301：神马站长平台的验证器只走 HTTP 且不跟随 301
+> （日志实测 140.205.85.x 以老 Chrome UA 抓 `http://` 全部拿到 301 后报「验证失败：请检查验证文件或验证码是否正确部署」）。
+> HTTP 直出后页面 canonical/og:url 仍指向 HTTPS，重复收录由 canonical 规避。
+> 改动只存在于服务器 `/etc/nginx/sites-enabled/cncttc.com`（不在仓库里），改回强制 301 前先确认不再依赖神马验证。
 
 ---
 

@@ -58,12 +58,22 @@ DOCKER_DIR="$DEPLOY_DIR/bbs1org_docker"
 RELEASES="$DEPLOY_DIR/releases"
 BACKUP_DIR="$DEPLOY_DIR/backups/$STAMP"
 
-run() { # 在目标机执行；--host local 时直接在本机跑，便于发布演练
+run() { # 在目标机执行；--host local 时直接在本机跑，便于发布演练。
+        # 服务器对频繁新建 SSH 连接会间歇性超时/重置：仅连接级失败（退出码 255）自动重试，
+        # 远端命令自身的退出码原样返回，不做重试
     if [ "$HOST" = local ]; then
         sh -c "$1"
-    else
-        ssh $SSH_OPTS "$HOST" "$1"
+        return
     fi
+    for attempt in 1 2 3 4 5; do
+        ssh $SSH_OPTS "$HOST" "$1"
+        code=$?
+        if [ "$code" -ne 255 ]; then
+            return $code
+        fi
+        sleep $(( attempt * 10 ))
+    done
+    return 255
 }
 
 dcx() { # 在部署目录里执行 docker compose 子命令

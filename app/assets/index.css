@@ -2848,6 +2848,7 @@ label.grid:has(> textarea)>span{
 
 .pagination a,
 .pagination button,
+.pagination li.active>span,
 .pagination .ellipsis{
     display: inline-flex;
     align-items: center;

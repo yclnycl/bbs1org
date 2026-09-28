@@ -154,6 +154,70 @@ final class TopicTags
         return $st->fetchAll(PDO::FETCH_COLUMN);
     }
 
+    /* ==================== 后台管理（/admin?tab=tags） ==================== */
+
+    /** 产业链环节全集（新增/编辑话题词时的选项，与管线信源的环节命名一致） */
+    public static function chains(): array
+    {
+        return ['回收收集', '分拣批发', '出口贸易', '进口市场', '循环利用', '原料行情', '综合资讯'];
+    }
+
+    /** 后台列表：全部话题词（含停用）+ 各自的 TDK 生成状态 */
+    public static function admin_list(): array
+    {
+        return db()->query("SELECT g.*, m.source AS tdk_source, m.updated_at AS tdk_updated_at
+            FROM plugin_topic_tags g LEFT JOIN plugin_seo_tdk_meta m ON m.target_type='tag' AND m.target_id=g.id
+            ORDER BY g.position, g.id")->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** 新增话题词：关键词唯一；成功返回 true，空词或已存在返回 false */
+    public static function admin_add(string $keyword, string $chain, string $summary): bool
+    {
+        $keyword = trim($keyword);
+        if ($keyword === '' || self::find_active($keyword) !== null) return false;
+        $st = db()->prepare('SELECT id FROM plugin_topic_tags WHERE keyword = ?');
+        $st->execute([$keyword]);
+        if ($st->fetchColumn() !== false) return false;
+        $position = (int)db()->query('SELECT COALESCE(MAX(position), -1) + 1 FROM plugin_topic_tags')->fetchColumn();
+        $ts = now();
+        $st = db()->prepare("INSERT INTO plugin_topic_tags (keyword, chain, summary, status, position, created_at, updated_at)
+            VALUES (?, ?, ?, 'active', ?, ?, ?)");
+        $st->execute([cut($keyword, 30), cut(trim($chain), 20), cut(trim($summary), 500), $position, $ts, $ts]);
+        return true;
+    }
+
+    /** 批量保存排位/环节/摘要（后台表格按 id 提交） */
+    public static function admin_update_all(array $chains, array $summaries, array $positions): int
+    {
+        $st = db()->prepare('UPDATE plugin_topic_tags SET chain = ?, summary = ?, position = ?, updated_at = ? WHERE id = ?');
+        $n = 0;
+        $ts = now();
+        foreach ($summaries as $id => $summary) {
+            $id = (int)$id;
+            if ($id <= 0) continue;
+            $st->execute([
+                cut(trim((string)($chains[$id] ?? '')), 20),
+                cut(trim((string)$summary), 500),
+                max(0, (int)($positions[$id] ?? 0)),
+                $ts,
+                $id,
+            ]);
+            $n += $st->rowCount() ? 1 : 0;
+        }
+        return $n;
+    }
+
+    /** 启用/停用切换，返回切换后的状态 */
+    public static function admin_toggle(int $id): string
+    {
+        $st = db()->prepare("UPDATE plugin_topic_tags
+            SET status = CASE status WHEN 'active' THEN 'hidden' ELSE 'active' END, updated_at = ? WHERE id = ?");
+        $st->execute([now(), $id]);
+        $st = db()->prepare('SELECT status FROM plugin_topic_tags WHERE id = ?');
+        $st->execute([$id]);
+        return (string)$st->fetchColumn();
+    }
+
     /**
      * 话题页主题列表：全文索引命中该关键词的主题，按时间倒序（话题页是「最新动态」入口）。
      * 行结构与首页列表一致，可直接交给 ui.topic_list_row；脱敏口径与列表页相同。

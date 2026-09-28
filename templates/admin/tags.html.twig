@@ -1,0 +1,57 @@
+{% extends 'admin/layout.html.twig' %}
+{% import 'macros/form.html.twig' as f %}
+{% block admin_body %}
+    <div class="form-panel settings-form">
+        <h2>新增话题词</h2>
+        <p>话题词驱动 /tag/{关键词} 聚合页、首页侧栏、页脚与主题页「相关话题」内链。摘要用一句定义式陈述（会作为页面首段与 meta description 兜底），TDK 标题/描述由 SEO TDK 队列自动生成。</p>
+        <form method="post">
+            {{ f.token() }}
+            <input type="hidden" name="action" value="add">
+            {{ f.input('关键词', 'keyword', '', 'text', true, '2-30 个字符，站内语料中真实出现过的行业词') }}
+            <div class="row settings-actions">
+                <select name="chain" aria-label="产业链环节">
+                    {% for c in chains %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+                </select>
+            </div>
+            <div class="row settings-actions"><textarea name="summary" rows="2" maxlength="500" placeholder="一句话定义式摘要，如：旧衣回收箱是设置在社区、学校等场所的衣物定点回收设施……" style="width:100%"></textarea></div>
+            <div class="row settings-actions"><button type="submit">添加话题词</button></div>
+        </form>
+    </div>
+    <div class="form-panel settings-form">
+        <h2>词库管理（{{ tags|length }} 个）</h2>
+        <p>停用后页面 404，并从 sitemap、侧栏、页脚与相关话题内链中消失；TDK 队列只处理启用中的词。改摘要后 TDK 不会自动重生成，如需更新可在 SEO TDK 页重跑或手工清掉对应记录。</p>
+        <form method="post">
+            {{ f.token() }}
+            <input type="hidden" name="action" value="edit_all">
+            <table class="list admin-bulk-list">
+                <tr><th>排位</th><th>关键词</th><th>环节</th><th>TDK</th><th>摘要（meta description 兜底）</th><th>操作</th></tr>
+                {% for g in tags %}
+                    <tr>
+                        <td><input type="number" name="position[{{ g.id }}]" value="{{ g.position }}" min="0" max="9999" style="width:72px"></td>
+                        <td>{{ g.keyword }}</td>
+                        <td>
+                            <select name="chain[{{ g.id }}]">
+                                {% for c in chains %}<option value="{{ c }}"{{ g.chain == c ? ' selected' }}>{{ c }}</option>{% endfor %}
+                            </select>
+                        </td>
+                        <td>
+                            {% if g.tdk_source == 'ai' %}AI{% elseif g.tdk_source == 'rule' %}规则{% elseif g.tdk_source == 'failed' %}失败待重试{% else %}待生成{% endif %}
+                            {% if g.tdk_updated_at %}<br><small>{{ g.tdk_updated_at|date('m-d H:i') }}</small>{% endif %}
+                        </td>
+                        <td><textarea name="summary[{{ g.id }}]" rows="2" maxlength="500" style="width:100%">{{ g.summary }}</textarea></td>
+                        <td>
+                            <form method="post">
+                                {{ f.token() }}
+                                <input type="hidden" name="action" value="toggle">
+                                <input type="hidden" name="id" value="{{ g.id }}">
+                                <button type="submit">{{ g.status == 'active' ? '停用' : '启用' }}</button>
+                            </form>
+                            {% if g.status != 'active' %}<small>已停用</small>{% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </table>
+            <div class="row settings-actions"><button type="submit">保存全部修改</button></div>
+        </form>
+    </div>
+{% endblock %}

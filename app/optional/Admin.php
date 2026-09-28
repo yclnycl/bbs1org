@@ -288,6 +288,32 @@ final class Admin
         return ['groups' => groups_cache()];
     }
 
+    /** 话题词 tab：词库列表（含 TDK 生成状态）+ 产业链环节选项 */
+    public static function tags_view(): array
+    {
+        TopicTags::ensure_ready();
+        return ['tags' => TopicTags::admin_list(), 'chains' => TopicTags::chains()];
+    }
+
+    public static function tags_handle_post(): never
+    {
+        $action = (string)($_POST['action'] ?? '');
+        if ($action === 'add') {
+            $ok = TopicTags::admin_add(post('keyword', 30), post('chain', 20), post('summary', 500));
+            set_flash($ok ? '话题词已添加，TDK 会由队列自动生成' : '话题词为空或已存在，未添加');
+        } elseif ($action === 'edit_all') {
+            $n = TopicTags::admin_update_all(
+                is_array($_POST['chain'] ?? null) ? $_POST['chain'] : [],
+                is_array($_POST['summary'] ?? null) ? $_POST['summary'] : [],
+                is_array($_POST['position'] ?? null) ? $_POST['position'] : []);
+            set_flash('已保存 ' . $n . ' 个话题词的修改');
+        } elseif ($action === 'toggle') {
+            $status = TopicTags::admin_toggle((int)($_POST['id'] ?? 0));
+            set_flash($status === 'active' ? '话题词已启用' : '话题词已停用（页面 404，从 sitemap 与内链移除）');
+        }
+        go(admin_url(['tab' => 'tags']));
+    }
+
     public static function forums_view(): array
     {
         $forums = [];
@@ -316,20 +342,21 @@ final class Admin
         if ($tab === 'analytics' && is_post_request()) self::analytics_handle_post();
         if ($tab === 'i18n' && is_post_request()) self::i18n_handle_post();
         if ($tab === 'tdk' && is_post_request()) self::tdk_handle_post();
+        if ($tab === 'tags' && is_post_request()) self::tags_handle_post();
         if ($tab === 'topics' && is_post_request()) self::topics_handle_post();
         if ($tab === 'users' && is_post_request()) self::users_handle_post();
         if ($tab === 'mcp' && is_post_request()) self::mcp_handle_post();
         $template = match ($tab) {
             'settings' => 'admin/settings.html.twig', 'verify' => 'admin/verify.html.twig', 'analytics' => 'admin/analytics.html.twig', 'i18n' => 'admin/i18n.html.twig', 'groups' => 'admin/groups.html.twig', 'forums' => 'admin/forums.html.twig',
             'topics' => 'admin/topics.html.twig', 'users' => 'admin/users.html.twig', 'report' => 'admin/report.html.twig',
-            'mcp' => 'admin/mcp.html.twig', 'tdk' => 'admin/tdk.html.twig',
+            'mcp' => 'admin/mcp.html.twig', 'tdk' => 'admin/tdk.html.twig', 'tags' => 'admin/tags.html.twig',
             default => '',
         };
         if ($template === '') err('你访问的页面不存在', 404);
         $view = match ($tab) {
             'settings' => self::settings_html(), 'verify' => self::verify_view(), 'analytics' => self::analytics_view(), 'i18n' => self::i18n_view(), 'groups' => self::groups_view(), 'forums' => self::forums_view(),
             'topics' => self::topics_view(), 'users' => self::users_view(), 'report' => self::report_view(),
-            'mcp' => self::mcp_view(), 'tdk' => self::tdk_view(),
+            'mcp' => self::mcp_view(), 'tdk' => self::tdk_view(), 'tags' => self::tags_view(),
             default => [],
         };
         render_page($template, $view + ['tab' => $tab], '后台');

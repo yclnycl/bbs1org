@@ -3,7 +3,7 @@
 {% block admin_body %}
     <div class="form-panel settings-form">
         <h2>生成进度</h2>
-        <p>主题总数 <strong>{{ stats.total }}</strong>，已生成 <strong>{{ stats.covered }}</strong>，待处理 <strong>{{ stats.pending }}</strong>{% if stats.failed > 0 %}，失败挂起 <strong>{{ stats.failed }}</strong>{% endif %}。</p>
+        <p>主题总数 <strong>{{ stats.total }}</strong>，已生成 <strong>{{ stats.covered }}</strong>，待处理 <strong>{{ stats.pending }}</strong>{% if stats.failed > 0 %}，失败挂起 <strong>{{ stats.failed }}</strong>{% endif %}；话题词 <strong>{{ stats.tags_total|default(0) }}</strong> 个，待生成 <strong>{{ stats.tags_pending|default(0) }}</strong> 个。</p>
         <p>生成方式：{{ settings.tdk_ai_enabled == '1' ? (api_key_set ? 'AI（DeepSeek 接口）' : '规则兜底——未配置 API 密钥，AI 不可用') : '规则（AI 已在下方关闭）' }}；队列按主题 id 升序处理，页面访问每 {{ settings.tdk_interval_seconds }} 秒自动推进一批（每批 {{ settings.tdk_batch_size }} 篇），也可在下方手动处理。</p>
         {% if balance %}
             <p>账户余额：{{ balance.is_available ? '可用' : '不可用' }}{% for info in balance.infos %}，<strong>{{ info.total_balance }}</strong> {{ info.currency }}{% if info.granted_balance != '0.00' %}（含赠金 {{ info.granted_balance }}）{% endif %}{% endfor %}。</p>

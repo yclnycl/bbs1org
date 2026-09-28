@@ -76,7 +76,7 @@ final class TopicTDK
         save_settings_values(['tdk_schema_version' => (string)self::SCHEMA_VERSION]);
     }
 
-    /** @return array<string,int> total=主题总数 pending=待生成 failed=失败挂起（仅统计现存主题，已删主题的遗留行不计） */
+    /** @return array<string,int> total=主题总数 pending=待生成 failed=失败挂起（仅统计现存主题，已删主题的遗留行不计）；tags_* 为话题词队列计数 */
     public static function stats(): array
     {
         self::ensure_schema();
@@ -86,15 +86,35 @@ final class TopicTDK
             WHERE m.target_type='topic' AND m.source<>'failed'")->fetchColumn();
         $failed = (int)$db->query("SELECT count(*) FROM plugin_seo_tdk_meta m JOIN app_topics t ON t.id=m.target_id
             WHERE m.target_type='topic' AND m.source='failed' AND m.attempts<" . self::ATTEMPT_LIMIT)->fetchColumn();
-        return ['total' => $total, 'covered' => min($total, $covered), 'pending' => max(0, $total - $covered - $failed), 'failed' => $failed];
+        $tags = ['tags_total' => 0, 'tags_pending' => 0];
+        if ((int)$db->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='plugin_topic_tags'")->fetchColumn()) {
+            $tags['tags_total'] = (int)$db->query("SELECT count(*) FROM plugin_topic_tags WHERE status='active'")->fetchColumn();
+            $tags_covered = (int)$db->query("SELECT count(*) FROM plugin_seo_tdk_meta m JOIN plugin_topic_tags g ON g.id=m.target_id
+                WHERE m.target_type='tag' AND m.source<>'failed'")->fetchColumn();
+            $tags['tags_pending'] = max(0, $tags['tags_total'] - $tags_covered);
+        }
+        return ['total' => $total, 'covered' => min($total, $covered), 'pending' => max(0, $total - $covered - $failed), 'failed' => $failed] + $tags;
     }
 
     /** 详情页的 TDK 取值：无记录或失败占位的返回 null（走默认规则），生成结果原样返回 */
     public static function meta_for(int $topic_id): ?array
     {
+        return self::meta_for_target('topic', $topic_id);
+    }
+
+    /** 话题页的 TDK 取值（target_type='tag'）：无记录或失败占位返回 null，走关键词+手写摘要默认规则 */
+    public static function meta_for_tag(int $tag_id): ?array
+    {
+        return self::meta_for_target('tag', $tag_id);
+    }
+
+    private static function meta_for_target(string $target_type, int $target_id): ?array
+    {
         self::ensure_schema();
-        $row = db()->query("SELECT title, description, keywords, source, locked FROM plugin_seo_tdk_meta
-            WHERE target_type='topic' AND target_id=" . (int)$topic_id)->fetch(PDO::FETCH_ASSOC);
+        $st = db()->prepare("SELECT title, description, keywords, source, locked FROM plugin_seo_tdk_meta
+            WHERE target_type = ? AND target_id = " . (int)$target_id);
+        $st->execute([$target_type]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
         if (!$row || $row['source'] === 'failed' || (trim((string)$row['title']) === '' && trim((string)$row['description']) === '')) return null;
         return $row;
     }
@@ -147,17 +167,59 @@ final class TopicTDK
                         $source = 'rule';
                     }
                     if ($paid) $tdk = array_map(static fn(string $v): string => mask_contacts($v), $tdk);
-                    self::upsert_meta((int)$id, $tdk, $source, self::fingerprint($t), (int)(microtime(true) * 1000) - $started);
+                    self::upsert_meta('topic', (int)$id, $tdk, $source, self::fingerprint($t), (int)(microtime(true) * 1000) - $started);
                     $done++;
                 } catch (Throwable $e) {
-                    self::record_failure((int)$id, mb_substr($e->getMessage(), 0, 200), (int)(microtime(true) * 1000) - $started);
+                    self::record_failure('topic', (int)$id, mb_substr($e->getMessage(), 0, 200), (int)(microtime(true) * 1000) - $started);
                     $failed++;
                 }
             }
+            // 主题队列之后接着推话题词队列：同一把租约、同一套失败重试口径
+            [$tag_done, $tag_failed] = self::process_tags($batch);
+            $done += $tag_done;
+            $failed += $tag_failed;
             return ['done' => $done, 'failed' => $failed, 'skipped' => 0];
         } finally {
             self::save_lease(0);
         }
+    }
+
+    /**
+     * 话题词 TDK 批处理：喂给 AI 的是话题词 + 定义摘要 + 站内最新相关主题标题，
+     * 让 title/description 带上真实语料的行业词，而不只是复述种子摘要。
+     */
+    private static function process_tags(int $batch): array
+    {
+        $db = db();
+        // 表可能还没被首次访问播种（TopicTags::ensure_ready），没有就安静跳过
+        if (!(int)$db->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='plugin_topic_tags'")->fetchColumn()) return [0, 0];
+        $done = 0;
+        $failed = 0;
+        foreach (self::pending_tag_ids($batch) as $tag_id) {
+            $g = $db->query('SELECT * FROM plugin_topic_tags WHERE id=' . (int)$tag_id)->fetch(PDO::FETCH_ASSOC);
+            if (!$g) continue;
+            $sample = '';
+            foreach (TopicTags::topic_rows((string)$g['keyword'], 5) as $row) {
+                $sample .= '- ' . mb_substr((string)$row['title'], 0, 60) . "\n";
+            }
+            $feed_t = (string)$g['keyword'];
+            $feed = ['title' => $feed_t, 'body' => trim((string)$g['summary'] . ($sample !== '' ? "\n站内相关主题标题：\n" . $sample : ''))];
+            $started = (int)(microtime(true) * 1000);
+            try {
+                $tdk = self::ai_enabled() ? self::generate_ai($feed, '产业链话题') : null;
+                $source = 'ai';
+                if ($tdk === null) {
+                    $tdk = self::generate_rule($feed, '产业链话题');
+                    $source = 'rule';
+                }
+                self::upsert_meta('tag', (int)$tag_id, $tdk, $source, hash('sha256', $feed_t . "\n" . (string)$g['summary']), (int)(microtime(true) * 1000) - $started);
+                $done++;
+            } catch (Throwable $e) {
+                self::record_failure('tag', (int)$tag_id, mb_substr($e->getMessage(), 0, 200), (int)(microtime(true) * 1000) - $started);
+                $failed++;
+            }
+        }
+        return [$done, $failed];
     }
 
     /** 官方模型清单（api-docs.deepseek.com 的 create-chat-completion）：后台下拉选择，不开放手填 */
@@ -249,31 +311,41 @@ final class TopicTDK
         return array_map('intval', $rows);
     }
 
-    private static function upsert_meta(int $topic_id, array $tdk, string $source, string $fingerprint, int $duration_ms = 0): void
+    /** 话题词队列：启用中的话题无 TDK 记录、或失败未超限的，按 seed 排位处理 */
+    private static function pending_tag_ids(int $limit): array
+    {
+        $rows = db()->query("SELECT g.id FROM plugin_topic_tags g
+            LEFT JOIN plugin_seo_tdk_meta m ON m.target_type='tag' AND m.target_id=g.id
+            WHERE g.status='active' AND (m.id IS NULL OR (m.source='failed' AND m.attempts<" . self::ATTEMPT_LIMIT . "))
+            ORDER BY g.position, g.id LIMIT " . max(1, $limit))->fetchAll(PDO::FETCH_COLUMN);
+        return array_map('intval', $rows);
+    }
+
+    private static function upsert_meta(string $target_type, int $target_id, array $tdk, string $source, string $fingerprint, int $duration_ms = 0): void
     {
         $db = db();
         $ts = now();
         $st = $db->prepare("INSERT INTO plugin_seo_tdk_meta
             (target_type, target_id, title, description, keywords, source, locked, fingerprint, created_at, updated_at, attempts, last_error, duration_ms)
-            VALUES ('topic', ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, '', ?)
+            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, '', ?)
             ON CONFLICT(target_type, target_id) DO UPDATE SET
                 title=excluded.title, description=excluded.description, keywords=excluded.keywords, source=excluded.source,
                 fingerprint=excluded.fingerprint, updated_at=excluded.updated_at, attempts=0, last_error='', duration_ms=excluded.duration_ms
             WHERE plugin_seo_tdk_meta.locked=0");
-        $st->execute([$topic_id, $tdk['title'], $tdk['description'], $tdk['keywords'], $source, $fingerprint, $ts, $ts, $duration_ms]);
+        $st->execute([$target_type, $target_id, $tdk['title'], $tdk['description'], $tdk['keywords'], $source, $fingerprint, $ts, $ts, $duration_ms]);
     }
 
-    private static function record_failure(int $topic_id, string $message, int $duration_ms = 0): void
+    private static function record_failure(string $target_type, int $target_id, string $message, int $duration_ms = 0): void
     {
         $db = db();
         $ts = now();
         $st = $db->prepare("INSERT INTO plugin_seo_tdk_meta
             (target_type, target_id, title, description, keywords, source, locked, fingerprint, created_at, updated_at, attempts, last_error, duration_ms)
-            VALUES ('topic', ?, '', '', '', 'failed', 0, '', ?, ?, 1, ?, ?)
+            VALUES (?, ?, '', '', '', 'failed', 0, '', ?, ?, 1, ?, ?)
             ON CONFLICT(target_type, target_id) DO UPDATE SET
                 source='failed', attempts=plugin_seo_tdk_meta.attempts+1, last_error=excluded.last_error, updated_at=excluded.updated_at, duration_ms=excluded.duration_ms
             WHERE plugin_seo_tdk_meta.locked=0");
-        $st->execute([$topic_id, $ts, $ts, $message, $duration_ms]);
+        $st->execute([$target_type, $target_id, $ts, $ts, $message, $duration_ms]);
     }
 
     /**

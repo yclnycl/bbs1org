@@ -15,8 +15,8 @@
                 <p>{{ '如果你发现内容与事实不符或有侵权问题，欢迎在行业动态版块留言反馈，我们会尽快核实处理。'|t }}</p>
                 <h2>{{ '常见问题'|t }}</h2>
                 {% for qa in faq %}
-                    <h3 class="about-faq-q">{{ qa[0] }}</h3>
-                    <p class="about-faq-a">{{ qa[1] }}</p>
+                    <h3 class="about-faq-q">{{ qa[0]|t }}</h3>
+                    <p class="about-faq-a">{{ qa[1]|t }}</p>
                 {% endfor %}
             </div>
         </div></div>

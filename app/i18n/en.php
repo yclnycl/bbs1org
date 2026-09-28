@@ -163,6 +163,24 @@ return [
     '页脚导航' => 'Footer',
     '关于本站' => 'About',
 
+    // 关于页（/about，中英双语）
+    '全球旧衣资讯网是面向旧衣回收、分拣批发与二手服装出口贸易从业者的行业资讯与交流社区，汇总全球回收、出口与再生利用的行业动态与行情数据。' => 'CNCTTC is a news and community site for professionals in used-clothing collection, sorting & wholesale, and secondhand apparel export — tracking global recycling, export and textile-to-fiber circularity news and market data.',
+    '本站做什么' => 'What this site covers',
+    '全球旧衣资讯网聚焦旧衣回收与二手服装贸易产业链：从社区回收、分拣打包、统货批发，到非洲、东南亚等出口市场，再到废纺再生与羽绒、棉花等原料行情。' => 'CNCTTC follows the full used-clothing trade chain: community collection, sorting and baling, mixed-goods (tonghuo) wholesale, export markets across Africa and Southeast Asia, textile-waste recycling, and raw-material prices for down and cotton.',
+    '站点由行业动态、政策法规、市场行情、回收环保、平台商业、技术工艺、出口信息七个资讯版块，以及货源市场、旧衣原料、鞋子统货、精品单件、出口专区、行业服务、周边市场七个供需版块组成。' => 'The site has seven news sections (industry news, policy & regulation, market prices, recycling & environment, platform business, technology, export data) and seven supply-demand boards (supply sources, used-clothing raw material, mixed shoes, graded singles, export zone, industry services, adjacent markets).',
+    '内容从哪里来' => 'Where the content comes from',
+    '资讯版块的内容由编辑流程从全球行业媒体的公开报道聚合改写而来，每篇文末标注原文来源与发布时间；供需信息由行业用户自行发布，联系方式按版块规则对访客打码。' => 'News-section articles are rewritten by our editorial pipeline from public reporting by industry media worldwide, with the original source and publication date linked at the end of each post. Supply and demand listings are posted by industry users; contact details are masked for visitors per board rules.',
+    '如果你发现内容与事实不符或有侵权问题，欢迎在行业动态版块留言反馈，我们会尽快核实处理。' => 'If anything is inaccurate or infringes your rights, leave a note in the Industry News board and we will verify and fix it promptly.',
+    '常见问题' => 'FAQ',
+    '全球旧衣资讯网是什么？' => 'What is CNCTTC?',
+    '面向旧衣回收、二手服装批发与出口贸易从业者的行业资讯与交流社区，全站内容免费浏览，行业动态每日更新。' => 'A news and community site for used-clothing recycling, wholesale and export professionals. All content is free to read, with industry news updated daily.',
+    '站内资讯内容从哪里来？' => 'Where does the news content come from?',
+    '行业动态等资讯版块的内容由编辑流程从全球行业媒体的公开报道聚合改写而来，每篇文末标注原文来源与发布时间；货源、原料等供需信息由行业用户自行发布。' => 'News-section articles are rewritten by our editorial pipeline from public industry reporting worldwide, with the original source and date cited at the end of each post. Supply and demand listings are posted by industry users themselves.',
+    '如何发布供应或求购信息？' => 'How do I post a supply or buying listing?',
+    '注册账号后选择对应版块发帖即可。收费版块的联系方式对访客打码，注册登录后可见。' => 'Register an account and post in the matching board. In paid boards, contact details are masked for visitors and visible after you register and log in.',
+    '如何联系站点？' => 'How do I contact the site?',
+    '可在行业动态版块发帖留言，编辑部会定期查看处理。' => 'Post a note in the Industry News board — the editors check it regularly.',
+
     // 联系方式打码弹窗（前端从 body data 属性读取）
     '添加微信' => 'Add on WeChat',
     '微信二维码' => 'WeChat QR code',

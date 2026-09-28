@@ -1571,7 +1571,7 @@ function page_common_data(string $title, array $seo = []): array
 /** 当前公共页在各语言下的绝对地址表（zh-CN / 各启用语言 / x-default→首选非中文语言），多语言关闭或非公共页返回空 */
 function lang_alternates(): array
 {
-    static $pages = ['home', 'forum', 'topic'];
+    static $pages = ['home', 'forum', 'topic', 'about'];
     $langs = enabled_langs();
     $route = (string)($_GET['a'] ?? 'home');
     if (!$langs || !in_array($route, $pages, true) || is_post_request()) return [];
@@ -2373,7 +2373,11 @@ function tag_page(): void
     TopicTags::ensure_ready();
     $tag = TopicTags::find_active($kw) ?: err('你访问的页面不存在', 404);
     $rows = TopicTags::topic_rows($kw, 100);
-    $seo = page_seo('tag', ['kw' => $kw], (string)$tag['summary'], (string)$tag['keyword']);
+    // TDK 队列产出优先（AI 生成、含真实语料行业词）；没生成过就用关键词 + 手写摘要兜底
+    $tdk = TopicTDK::meta_for_tag((int)$tag['id']);
+    $page_title = $tdk !== null && trim((string)$tdk['title']) !== '' ? (string)$tdk['title'] : (string)$tag['keyword'];
+    $page_description = $tdk !== null && trim((string)$tdk['description']) !== '' ? (string)$tdk['description'] : (string)$tag['summary'];
+    $seo = page_seo('tag', ['kw' => $kw], $page_description, $page_title);
     $tag_url = absolute_url(route_url('tag', ['kw' => $kw]));
     $seo['jsonld'] = [
         [
@@ -2400,14 +2404,13 @@ function tag_page(): void
         'rows' => $rows,
         'siblings' => TopicTags::siblings((int)$tag['id'], (string)$tag['chain']),
         'search_url' => route_url('search', ['q' => $kw]),
-    ], (string)$tag['keyword'], $seo);
+    ], $page_title, $seo);
 }
-/** /about：关于本站——组织实体的 E-E-A-T 落地页（FAQ 手写内容 + FAQPage 结构化数据）。内容只做中文，非默认语言回中文页 */
+/** /about：关于本站——组织实体的 E-E-A-T 落地页（FAQ 手写内容 + FAQPage 结构化数据），中英双语（词条在 app/i18n/） */
 function about_page(): void
 {
-    if (current_lang() !== DEFAULT_LANG) go(route_url('about', [], DEFAULT_LANG));
-    $description = '全球旧衣资讯网是面向旧衣回收、分拣批发与二手服装出口贸易从业者的行业资讯与交流社区，汇总全球回收、出口与再生利用的行业动态与行情数据。';
-    $seo = page_seo('about', [], $description, '关于本站');
+    $description = t('全球旧衣资讯网是面向旧衣回收、分拣批发与二手服装出口贸易从业者的行业资讯与交流社区，汇总全球回收、出口与再生利用的行业动态与行情数据。');
+    $seo = page_seo('about', [], $description, t('关于本站'));
     $faq = [
         ['全球旧衣资讯网是什么？', '面向旧衣回收、二手服装批发与出口贸易从业者的行业资讯与交流社区，全站内容免费浏览，行业动态每日更新。'],
         ['站内资讯内容从哪里来？', '行业动态等资讯版块的内容由编辑流程从全球行业媒体的公开报道聚合改写而来，每篇文末标注原文来源与发布时间；货源、原料等供需信息由行业用户自行发布。'],
@@ -2418,14 +2421,15 @@ function about_page(): void
         [
             '@context' => 'https://schema.org',
             '@type' => 'FAQPage',
+            // FAQ 结构化数据按当前语言输出：英文页出英文 Q&A，与页面可见内容一致
             'mainEntity' => array_map(static fn(array $qa): array => [
                 '@type' => 'Question',
-                'name' => $qa[0],
-                'acceptedAnswer' => ['@type' => 'Answer', 'text' => $qa[1]],
+                'name' => t($qa[0]),
+                'acceptedAnswer' => ['@type' => 'Answer', 'text' => t($qa[1])],
             ], $faq),
         ],
     ];
-    render_page('about.html.twig', ['faq' => $faq, 'about_description' => $description], '关于本站', $seo);
+    render_page('about.html.twig', ['faq' => $faq, 'about_description' => $description], t('关于本站'), $seo);
 }
 function topic_page_replies(array $topic, int $page, int $size, int $offset, bool $reply_desc): array
 {
@@ -2686,7 +2690,7 @@ function reply_edit_page(): void
 function admin_tabs(): array
 {
     $items = [];
-    foreach (['settings' => '设置', 'verify' => '站点验证', 'analytics' => '统计', 'tdk' => 'SEO TDK', 'i18n' => '多语言', 'forums' => '版块', 'groups' => '用户组', 'topics' => '帖子管理', 'users' => '用户管理', 'report' => '数据报表', 'mcp' => 'MCP日志'] as $key => $label) {
+    foreach (['settings' => '设置', 'verify' => '站点验证', 'analytics' => '统计', 'tdk' => 'SEO TDK', 'tags' => '话题词', 'i18n' => '多语言', 'forums' => '版块', 'groups' => '用户组', 'topics' => '帖子管理', 'users' => '用户管理', 'report' => '数据报表', 'mcp' => 'MCP日志'] as $key => $label) {
         $items[$key] = ['label' => $label, 'href' => admin_url(['tab' => $key])];
     }
     return $items;
@@ -2813,9 +2817,9 @@ function sitemap_xml_response(string $xml): never
  * 页数同样受最大分页数约束——超出上限的页码会被前台钳到最后一页，生成链接只会产出重复内容 */
 function sitemap_page_urls(): array
 {
+    // 关于页已双语化（en 词条在 app/i18n/en.php），与首页同口径输出 hreflang 互补链接
     $urls = sitemap_page_url_langs('home');
-    // 关于页只有中文：以 zh URL 进 sitemap（同话题页口径）
-    $urls[] = '<url><loc>' . h(absolute_url(route_url('about', [], DEFAULT_LANG))) . '</loc></url>';
+    $urls = array_merge($urls, sitemap_page_url_langs('about'));
     $size = max(1, (int)setting('topics_per_page', '30'));
     $max_pages = max_pagination_pages();
     // 首页列表的第 1 页就是站点根，分页链接从第 2 页开始

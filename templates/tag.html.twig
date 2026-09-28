@@ -1,0 +1,31 @@
+{% extends 'layout.html.twig' %}
+{% import 'macros/ui.html.twig' as ui %}
+{% block content %}
+    <div class="home-shell tag-page"><div class="forum-layout">
+        <div class="forum-main"><div class="main-panel">
+            <header class="list-heading tag-page-head">
+                <h1 class="list-title">{{ tag.keyword }}</h1>
+                {% if tag.summary %}<p class="list-sub">{{ tag.summary }}</p>{% endif %}
+            </header>
+            {% if siblings %}
+                <div class="tag-strip tag-strip-page">
+                    {% for kw in siblings %}
+                        <a class="tag-chip" href="{{ route_url('tag', {kw: kw}) }}">{{ kw }}</a>
+                    {% endfor %}
+                </div>
+            {% endif %}
+            <ul class="post-list tag-page-list">
+                {% if not rows %}
+                    <li class="empty-state">{{ '暂无相关主题，去论坛发一条吧'|t }}</li>
+                {% else %}
+                    {% for t in rows %}
+                        {{ ui.topic_list_row(t, 'post') }}
+                    {% endfor %}
+                {% endif %}
+            </ul>
+            {% if rows %}
+                <p class="tag-more"><a href="{{ search_url }}" data-no-ajax="1">{{ '搜索更多相关内容'|t }}“{{ tag.keyword }}”</a></p>
+            {% endif %}
+        </div></div>
+    </div></div>
+{% endblock %}

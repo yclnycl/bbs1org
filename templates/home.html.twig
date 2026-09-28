@@ -48,6 +48,20 @@
             </ul>
             {% if pagination %}<div class="pagination-bar">{{ pagination.kind == 'simple' ? ui.simple_pagination(pagination.has_prev, pagination.has_next, pagination.page, pagination.url, pagination.limited) : ui.pagination(pagination.total, pagination.page, pagination.size, pagination.url, pagination.limited, pagination.hidden|default([])) }}</div>{% endif %}
         </div></div>
-        <aside class="sidebar">{{ ui.user_card(sidebar_user, false, fid) }}</aside>
+        <aside class="sidebar">{{ ui.user_card(sidebar_user, false, fid) }}
+            {% if tag_chips %}
+                <div class="side-tags">
+                    <h3 class="side-tags-title">{{ '产业链话题'|t }}</h3>
+                    {% for chain, tags in tag_chips %}
+                        <h4 class="side-tags-chain">{{ chain }}</h4>
+                        <div class="tag-strip">
+                            {% for tg in tags %}
+                                <a class="tag-chip" href="{{ route_url('tag', {kw: tg.keyword}) }}">{{ tg.keyword }}</a>
+                            {% endfor %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        </aside>
     </div></div>
 {% endblock %}

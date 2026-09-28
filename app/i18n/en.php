@@ -152,6 +152,11 @@ return [
     '一次命中帖子标题、正文与回帖，相关内容自动展开并标红。' => 'Matches topic titles, content and replies in one search — hits are expanded and highlighted.',
     '没有找到匹配的结果' => 'No matching results',
 
+    // 话题聚合页（/tag/关键词）与首页侧栏话题组
+    '产业链话题' => 'Industry topics',
+    '暂无相关主题，去论坛发一条吧' => 'No related topics yet — start one on the forum',
+    '搜索更多相关内容' => 'Search for more about ',
+
     // 联系方式打码弹窗（前端从 body data 属性读取）
     '添加微信' => 'Add on WeChat',
     '微信二维码' => 'WeChat QR code',

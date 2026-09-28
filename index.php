@@ -18,6 +18,7 @@ use app\optional\Model\User;
 use app\optional\Model\ViewStat;
 use app\optional\Search;
 use app\optional\SearchIndex;
+use app\optional\TopicTags;
 use app\optional\TopicTDK;
 use app\optional\Translator;
 if (!is_file(__DIR__ . '/vendor/autoload.php')) {
@@ -1101,6 +1102,11 @@ function route_url(string $a = 'home', array $params = [], ?string $lang = null)
         $segments[] = rawurlencode((string)$params['id']);
         unset($params['id']);
     }
+    // 话题页：/tag/{关键词}，关键词进路径（中文原样百分号编码，搜索引擎可读）
+    if ($a === 'tag' && isset($params['kw']) && (string)$params['kw'] !== '') {
+        $segments[] = rawurlencode((string)$params['kw']);
+        unset($params['kw']);
+    }
     return append_url_query(app_url(implode('/', $segments)), $params);
 }
 function asset_url(string $file): string
@@ -1277,6 +1283,8 @@ function parse_path_route(): void
     }
     if (isset($segments[0]) && $segments[0] !== 'a' && !array_key_exists('a', $_GET)) $_GET['a'] = rawurldecode($segments[0]);
     if (isset($segments[1]) && ctype_digit($segments[1]) && !array_key_exists('id', $_GET)) $_GET['id'] = rawurldecode($segments[1]);
+    // /tag/{关键词} 的第二段是中文关键词，不满足 ctype_digit，单独映射
+    if (isset($segments[0], $segments[1]) && $segments[0] === 'tag' && !array_key_exists('kw', $_GET)) $_GET['kw'] = rawurldecode($segments[1]);
 }
 function markdown_html(string $text, int $topic_id = 0): string
 {
@@ -2335,6 +2343,8 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
         'category_active' => $category_active,
         'pagination' => $pagination,
         'sidebar_user' => $profile_uid ? $filter_user : null,
+        // 首页第一页侧栏挂话题词入口：给聚合页一批全站最重的内链
+        'tag_chips' => $is_home_first_page ? TopicTags::chips() : [],
         'shell_class' => $profile_uid ? 'profile-mobile-sidebar' . ($own_profile ? ' profile-mobile-sidebar-own' : '') : ($is_home_first_page ? 'home-mobile-sidebar' : ''),
     ], $title, $seo);
 }
@@ -2348,6 +2358,45 @@ function forum_page(): void
     $f = forum_by_id($fid) ?: err('你访问的页面不存在', 404);
     if (!forum_group_allowed($f, 'allow_view_groups')) err('无权限');
     topic_index_page($f);
+}
+/** /tag/{关键词}：站内话题词库的关键词聚合页——同话题主题聚合成一个落地页（programmatic SEO） */
+function tag_page(): void
+{
+    $kw = trim((string)($_GET['kw'] ?? ''));
+    if ($kw === '' || search_char_count($kw) > 30) err('你访问的页面不存在', 404);
+    // 话题页只有中文内容：非默认语言一律回中文页，避免同内容多语言重复收录
+    if (current_lang() !== DEFAULT_LANG) go(route_url('tag', ['kw' => $kw], DEFAULT_LANG));
+    TopicTags::ensure_ready();
+    $tag = TopicTags::find_active($kw) ?: err('你访问的页面不存在', 404);
+    $rows = TopicTags::topic_rows($kw, 100);
+    $seo = page_seo('tag', ['kw' => $kw], (string)$tag['summary'], (string)$tag['keyword']);
+    $tag_url = absolute_url(route_url('tag', ['kw' => $kw]));
+    $seo['jsonld'] = [
+        [
+            '@context' => 'https://schema.org',
+            '@type' => 'CollectionPage',
+            '@id' => $tag_url . '#collection',
+            'url' => $tag_url,
+            'name' => (string)$tag['keyword'],
+            'description' => (string)$tag['summary'],
+            'inLanguage' => 'zh-CN',
+            'isPartOf' => ['@id' => rtrim(base_url(), '/') . '/#website'],
+        ],
+        [
+            '@context' => 'https://schema.org',
+            '@type' => 'BreadcrumbList',
+            'itemListElement' => [
+                ['@type' => 'ListItem', 'position' => 1, 'name' => t('首页'), 'item' => rtrim(base_url(), '/') . '/'],
+                ['@type' => 'ListItem', 'position' => 2, 'name' => (string)$tag['keyword'], 'item' => $tag_url],
+            ],
+        ],
+    ];
+    render_page('tag.html.twig', [
+        'tag' => $tag,
+        'rows' => $rows,
+        'siblings' => TopicTags::siblings((int)$tag['id'], (string)$tag['chain']),
+        'search_url' => route_url('search', ['q' => $kw]),
+    ], (string)$tag['keyword'], $seo);
 }
 function topic_page_replies(array $topic, int $page, int $size, int $offset, bool $reply_desc): array
 {
@@ -2755,6 +2804,10 @@ function sitemap_page_urls(): array
 function sitemap_root_route(): void
 {
     $urls = sitemap_page_urls();
+    // 话题聚合页排在主题前面：它们是长尾搜索的主落地页，优先保证被分发
+    foreach (TopicTags::active() as $tag) {
+        $urls[] = '<url><loc>' . h(absolute_url(route_url('tag', ['kw' => (string)$tag['keyword']], DEFAULT_LANG))) . '</loc></url>';
+    }
     $forum_ids = array_map(static fn(array $f): int => (int)$f['id'], sitemap_viewable_forums());
     // 协议单文件上限 5 万条：主题按 id 升序填满剩余额度，装不下的仍可经 /sitemap-topics-{n}.xml 单独提交
     $remaining = SITEMAP_MAX_URLS - count($urls);
@@ -2767,6 +2820,18 @@ function sitemap_root_route(): void
     sitemap_xml_response('<?xml version="1.0" encoding="UTF-8"?>' . "\n"
         . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">' . "\n"
         . implode("\n", $urls) . "\n</urlset>\n");
+}
+
+/** /sitemap-tags.xml：话题聚合页单独一份，便于搜索引擎分组提交与诊断收录 */
+function sitemap_tags_route(): void
+{
+    $urls = [];
+    foreach (TopicTags::active() as $tag) {
+        $urls[] = '<url><loc>' . h(absolute_url(route_url('tag', ['kw' => (string)$tag['keyword']], DEFAULT_LANG))) . '</loc></url>';
+    }
+    sitemap_xml_response('<?xml version="1.0" encoding="UTF-8"?>' . "\n"
+        . '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n"
+        . ($urls ? implode("\n", $urls) . "\n" : '') . '</urlset>' . "\n");
 }
 
 /** /sitemap-pages.xml：首页 + 游客可见版块列表页（含分页页），lastmod 取该版块最新回帖时间 */
@@ -2839,6 +2904,12 @@ function llms_txt_route(): void
     foreach (sitemap_viewable_forums() as $f) {
         $intro = cut(seo_text((string)($f['description'] ?? '')), 80);
         $lines[] = '- [' . $f['name'] . '](' . absolute_url(route_url('forum', ['id' => (int)$f['id']])) . ')' . t('：') . ($intro !== '' ? $intro : t('该版块的最新主题与讨论'));
+    }
+    $lines[] = '';
+    $lines[] = t('## 产业链话题');
+    // 话题聚合页是按关键词聚合的主题集，AI 系统可按话题直接取整组相关内容
+    foreach (TopicTags::active() as $tag_row) {
+        $lines[] = '- [' . $tag_row['keyword'] . '](' . absolute_url(route_url('tag', ['kw' => (string)$tag_row['keyword']], DEFAULT_LANG)) . ')' . t('：') . cut(seo_text((string)$tag_row['summary']), 80);
     }
     $lines[] = '';
     $lines[] = t('## 使用说明');
@@ -2917,6 +2988,7 @@ function core_routes(): array
         'search' => [Search::class, 'page'],
         'sitemap.xml' => 'sitemap_root_route',
         'sitemap-pages.xml' => 'sitemap_pages_route',
+        'sitemap-tags.xml' => 'sitemap_tags_route',
         'robots.txt' => 'robots_txt_route',
         'llms.txt' => 'llms_txt_route',
         'feed.xml' => 'feed_route',
@@ -2925,6 +2997,7 @@ function core_routes(): array
         'preview' => 'preview_route',
         'forum' => 'forum_page',
         'topic' => 'topic_page',
+        'tag' => 'tag_page',
         'user' => 'user_page',
         'login' => 'login_page',
         'logout' => 'logout_route',

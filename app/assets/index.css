@@ -3237,49 +3237,10 @@ body:has(.topic-reply-bar) .back-to-top{
     border-radius: 0
 }
 
-.search-page-types{
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--sp-2) var(--sp-5)
-}
-
-.search-page-radio{
-    display: inline-flex;
-    align-items: center;
-    gap: var(--sp-2);
-    min-height: 32px;
-    color: var(--ink-3);
-    font-size: var(--fs-sm);
-    cursor: pointer
-}
-
-.search-page-radio input{
-    width: 17px;
-    height: 17px;
-    margin: 0;
-    padding: 0;
-    border-radius: var(--r-pill)
-}
-
-.search-page-radio input::after{
-    left: 5px;
-    top: 4px;
-    width: 7px;
-    height: 7px;
-    border: 0;
-    border-radius: 50%;
-    background: var(--on-inverse);
-    transform: scale(0)
-}
-
-.search-page-radio input:checked::after{
-    transform: scale(1)
-}
-
-.search-page-radio:has(input:checked){
-    color: var(--brand-strong);
-    font-weight: 600
+.search-page-hint{
+    margin: var(--sp-3) 0 0;
+    color: var(--ink-4);
+    font-size: var(--fs-sm)
 }
 
 .search-page-summary{
@@ -3293,6 +3254,61 @@ body:has(.topic-reply-bar) .back-to-top{
     list-style: none;
     margin: 0;
     padding: 0
+}
+
+/* 聚合搜索：命中上下文展开在主题行下方，关键词用红色标记 */
+.search-result-hits{
+    display: grid;
+    gap: var(--sp-2);
+    margin: var(--sp-2) 0 0;
+    padding: var(--sp-3);
+    border-left: 3px solid var(--brand-line);
+    border-radius: 0 var(--r-md) var(--r-md) 0;
+    background: var(--surface-2)
+}
+
+.search-hit-line{
+    display: flex;
+    align-items: baseline;
+    gap: var(--sp-2);
+    margin: 0
+}
+
+.search-hit-badge{
+    flex: 0 0 auto;
+    padding: 1px 6px;
+    border-radius: var(--r-sm);
+    background: var(--surface-3);
+    color: var(--ink-4);
+    font-size: var(--fs-xs);
+    line-height: 18px
+}
+
+.search-hit-text{
+    min-width: 0;
+    color: var(--ink-2);
+    font-size: var(--fs-sm);
+    line-height: 1.6;
+    word-break: break-word
+}
+
+.search-hit-text .search-hit-link{
+    color: inherit
+}
+
+.search-hit-meta{
+    display: block;
+    margin-top: 2px;
+    color: var(--ink-4);
+    font-size: var(--fs-xs)
+}
+
+mark.search-hit{
+    padding: 0 2px;
+    border-radius: 3px;
+    background: var(--danger-soft);
+    color: var(--danger);
+    font-weight: 600
 }
 
 /* 认证页页签 */

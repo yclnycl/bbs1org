@@ -17,6 +17,7 @@ use app\optional\Model\TopicDeletion;
 use app\optional\Model\User;
 use app\optional\Model\ViewStat;
 use app\optional\Search;
+use app\optional\SearchIndex;
 use app\optional\TopicTDK;
 use app\optional\Translator;
 if (!is_file(__DIR__ . '/vendor/autoload.php')) {
@@ -71,6 +72,10 @@ function app_db_connect(array $config): PDO
         PDO::ATTR_EMULATE_PREPARES => false,
     ]);
     foreach (['PRAGMA journal_mode=WAL', 'PRAGMA synchronous=NORMAL', 'PRAGMA temp_store=MEMORY', 'PRAGMA busy_timeout=5000', 'PRAGMA foreign_keys=ON'] as $sql) $db->exec($sql);
+    // 聚合搜索：全文索引触发器（fts_*_ai/au/ad）要在任何写连接上都能调到这个分词 UDF
+    // PHP 8.5 起驱动子类提供 createFunction()，旧方法名已标记废弃
+    $create = $db instanceof Pdo\Sqlite ? 'createFunction' : 'sqliteCreateFunction';
+    $db->$create('fts_index_text', static fn($text): string => SearchIndex::index_text((string)$text));
     return $db;
 }
 function app_db_types(): array

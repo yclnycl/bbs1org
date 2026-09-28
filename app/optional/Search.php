@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace app\optional;
@@ -9,18 +10,18 @@ if (!defined('APP_ROOT')) exit;
 
 final class Search
 {
+    /** 搜索结果页：标题/正文/回帖聚合查询，命中上下文展开并标红（SearchIndex 驱动） */
     public static function page(): void
     {
         if (!uid()) err('请登录后操作');
         $submitted = is_post_request();
         $query = $submitted ? post('q', length_limit('search', 'max')) : '';
-        $field = topic_search_field($submitted ? (string)($_POST['field'] ?? 'title') : 'title');
         $page = $submitted ? min(max_pagination_pages(), max(1, (int)($_POST['p'] ?? 1))) : 1;
         if ($query !== '') require_search_min_chars($query);
-        $rows = [];
+        $results = [];
         $has_prev = false;
         $has_next = false;
-        if ($query !== '') {
+        if ($query !== '' && $submitted) {
             if ($page === 1) {
                 $seconds = post_interval_seconds();
                 if ($seconds > 0) {
@@ -30,21 +31,15 @@ final class Search
                 }
             }
             $size = max(1, (int)setting('topics_per_page', '30'));
-            $data = topic_index_data(0, null, 'topics', $query, $field, 'comment', $page, $size);
-            foreach ($data['rows'] as $row) {
-                $row['time'] = (int)($row['list_time'] ?? $row['my_reply_at'] ?? ($row['last_reply_at'] ?: $row['created_at']));
-                $row['forum'] = forum_by_id((int)$row['forum_id']) ?: ['id' => 0, 'name' => ''];
-                $rows[] = $row;
-            }
+            $data = SearchIndex::page_results($query, $page, $size);
+            $results = $data['rows'];
             $has_prev = $page > 1;
-            $has_next = (bool)$data['has_next_page'];
+            $has_next = $data['has_next'];
         }
         render_page('search.html.twig', [
             'submitted' => $submitted,
             'query' => $query,
-            'field' => $field,
-            'field_options' => ['title' => '标题', 'body' => '内容', 'reply' => '回帖'],
-            'rows' => $rows,
+            'results' => $results,
             'has_prev' => $has_prev,
             'has_next' => $has_next,
             'page' => $page,

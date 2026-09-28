@@ -147,6 +147,10 @@ return [
     '请输入搜索关键词' => 'Enter a search keyword',
     '没有找到匹配的主题' => 'No matching topics found',
     '没有找到匹配的回帖' => 'No matching replies found',
+    '聚合搜索' => 'Search',
+    '同时搜索标题、内容与回帖' => 'Search titles, content and replies at once',
+    '一次命中帖子标题、正文与回帖，相关内容自动展开并标红。' => 'Matches topic titles, content and replies in one search — hits are expanded and highlighted.',
+    '没有找到匹配的结果' => 'No matching results',
 
     // 联系方式打码弹窗（前端从 body data 属性读取）
     '添加微信' => 'Add on WeChat',

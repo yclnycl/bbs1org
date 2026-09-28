@@ -118,7 +118,7 @@
 {%- set badges = t.is_pinned|default(0) ? '<span class="topic-badge pinned">' ~ '置顶'|t ~ '</span>' : '' -%}
 {%- set style = (t.highlight_style|default('')) != '' ? ' style="' ~ t.highlight_style|e ~ '"' : '' -%}
 {%- set forum_badge = has_forum ? '<a class="post-tag post-forum-badge" href="' ~ route_url('forum', {id: forum.id})|e ~ '">' ~ forum.name|e ~ '</a>' : '' -%}
-<li class="post-item{{ t.is_pinned|default(0) ? ' topic-pinned' : '' }}"><div class="post-avatar">{{ _self.avatar_link(t.user_id, t.username)|raw }}</div><div class="post-body"><div class="post-title-row">{{ badges|raw }}<a class="post-title" href="{{ topic_url }}"{{ style|raw }}>{{ t.title }}</a>{{ pages|raw }}</div>{{ reply_excerpt_html|raw }}<div class="post-meta">{{ meta|raw }}</div></div>{{ forum_badge|raw }}</li>
+<li class="post-item{{ t.is_pinned|default(0) ? ' topic-pinned' : '' }}"><div class="post-avatar">{{ _self.avatar_link(t.user_id, t.username)|raw }}</div><div class="post-body"><div class="post-title-row">{{ badges|raw }}<a class="post-title" href="{{ topic_url }}"{{ style|raw }}>{{ t.title_html|default('') != '' ? t.title_html|raw : t.title }}</a>{{ pages|raw }}</div>{{ reply_excerpt_html|raw }}<div class="post-meta">{{ meta|raw }}</div>{{ t.hits_html|default('')|raw }}</div>{{ forum_badge|raw }}</li>
 {%- endif -%}
 {% endmacro %}
 
@@ -218,13 +218,13 @@
 {%- endif -%}
 {% endmacro %}
 
-{% macro search_page_button(target, label, query, field) %}
-<form method="post" action="{{ route_url('search') }}" data-no-ajax="1"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ query }}"><input type="hidden" name="field" value="{{ field }}"><input type="hidden" name="p" value="{{ target }}"><button type="submit">{{ label }}</button></form>
+{% macro search_page_button(target, label, query) %}
+<form method="post" action="{{ route_url('search') }}" data-no-ajax="1"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"><input type="hidden" name="q" value="{{ query }}"><input type="hidden" name="p" value="{{ target }}"><button type="submit">{{ label }}</button></form>
 {%- endmacro %}
 
-{% macro search_pagination(has_prev, has_next, page, query, field) %}
+{% macro search_pagination(has_prev, has_next, page, query) %}
 {%- set next = (page >= max_pagination_pages()) ? false : has_next -%}
 {%- if has_prev or next -%}
-<div class="pagination-bar search-page-pagination"><div class="pagination"><ul>{% if has_prev %}<li>{{ _self.search_page_button(max(1, page - 1), '上一页', query, field) }}</li>{% endif %}<li class="active"><span>{{ page }}</span></li>{% if next %}<li>{{ _self.search_page_button(page + 1, '下一页', query, field) }}</li>{% endif %}</ul></div></div>
+<div class="pagination-bar search-page-pagination"><div class="pagination"><ul>{% if has_prev %}<li>{{ _self.search_page_button(max(1, page - 1), '上一页', query) }}</li>{% endif %}<li class="active"><span>{{ page }}</span></li>{% if next %}<li>{{ _self.search_page_button(page + 1, '下一页', query) }}</li>{% endif %}</ul></div></div>
 {%- endif -%}
 {% endmacro %}

@@ -23,7 +23,7 @@ if (!defined('APP_ROOT')) exit;
  *    transaction"、PDO::rollBack() 静默什么都不做——事务不会提交也不会回滚。这里自己
  *    跟踪事务状态，并把 commit()/rollBack() 改成直接发 SQL，两者就不再打架。
  */
-final class SqlitePdo extends PDO
+final class SqlitePdo extends \Pdo\Sqlite
 {
     private bool $inTransaction = false;
 

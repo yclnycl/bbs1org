@@ -240,10 +240,12 @@ final class TopicTDK
 
     private static function pending_ids(int $limit): array
     {
+        // content_updated_at 晚于上次生成的帖子（被编辑过）同样入队：行情帖每天改数据，TDK 必须跟着刷新；
+        // 编辑过的排最前（新帖 id 升序次之），避免老帖重跑挡住新帖
         $rows = db()->query("SELECT t.id FROM app_topics t
             LEFT JOIN plugin_seo_tdk_meta m ON m.target_type='topic' AND m.target_id=t.id
-            WHERE m.id IS NULL OR (m.source='failed' AND m.attempts<" . self::ATTEMPT_LIMIT . ")
-            ORDER BY t.id LIMIT " . max(1, $limit))->fetchAll(PDO::FETCH_COLUMN);
+            WHERE m.id IS NULL OR (m.source='failed' AND m.attempts<" . self::ATTEMPT_LIMIT . ") OR t.content_updated_at > COALESCE(m.updated_at, 0)
+            ORDER BY (t.content_updated_at > COALESCE(m.updated_at, 0)) DESC, t.id LIMIT " . max(1, $limit))->fetchAll(PDO::FETCH_COLUMN);
         return array_map('intval', $rows);
     }
 

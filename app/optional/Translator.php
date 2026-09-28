@@ -176,13 +176,13 @@ final class Translator
         return array_map(static fn(array $r): array => ['id' => (int)$r['id'], 'name' => (string)$r['name'], 'description' => (string)$r['description']], $st->fetchAll(PDO::FETCH_ASSOC));
     }
 
-    /** 待翻主题：无记录或失败未超限，按 id 降序（新帖优先） */
+    /** 待翻主题：无记录或失败未超限，或内容更新晚于译文（编辑过的帖子），按 id 降序（新帖优先） */
     private static function pending_topic_ids(string $lang, int $limit): array
     {
         $st = db()->prepare("SELECT t.id FROM app_topics t
             LEFT JOIN plugin_i18n_content c ON c.lang=? AND c.target_type='topic' AND c.target_id=t.id
-            WHERE c.id IS NULL OR (c.status='failed' AND c.attempts<?)
-            ORDER BY t.id DESC LIMIT " . max(1, $limit));
+            WHERE c.id IS NULL OR (c.status='failed' AND c.attempts<?) OR t.content_updated_at > COALESCE(c.updated_at, 0)
+            ORDER BY (t.content_updated_at > COALESCE(c.updated_at, 0)) DESC, t.id DESC LIMIT " . max(1, $limit));
         $st->execute([$lang, self::ATTEMPT_LIMIT]);
         return array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
     }

@@ -967,7 +967,7 @@ function mask_topic_contacts(array $t): array
 function ensure_schema_bumps(): void
 {
     static $done = false;
-    if ($done || (int)setting('schema_bumps', '0') >= 3) return;
+    if ($done || (int)setting('schema_bumps', '0') >= 4) return;
     $done = true;
     $db = db();
     $cols = array_column($db->query('PRAGMA table_info(app_forums)')->fetchAll(PDO::FETCH_ASSOC), 'name');
@@ -975,7 +975,14 @@ function ensure_schema_bumps(): void
     if (!in_array('parent_id', $cols, true)) $db->exec('ALTER TABLE app_forums ADD COLUMN parent_id INTEGER NOT NULL DEFAULT 0');
     // bump 3：旧部署把早期默认值 50 落了库，导致列表只能翻到 50 页；仍停留在 50 的按新默认值放开
     if (setting('max_pagination_pages', '') === '50') save_settings_values(['max_pagination_pages' => '1000']);
-    save_settings_values(['schema_bumps' => '3']);
+    // bump 4：主题内容编辑时间——last_reply_at 只跟回帖走，自动化每日改数据的帖子（价格行情）
+    // 一直带着旧时间，TDK/翻译队列也发现不了内容变过；编辑标题/正文时写 content_updated_at
+    $topic_cols = array_column($db->query('PRAGMA table_info(app_topics)')->fetchAll(PDO::FETCH_ASSOC), 'name');
+    if (!in_array('content_updated_at', $topic_cols, true)) {
+        $db->exec('ALTER TABLE app_topics ADD COLUMN content_updated_at INTEGER NOT NULL DEFAULT 0');
+        // 存量修补交由后台指纹回填（校正脚本比对 fingerprint 后写此列），避免这里全表误标
+    }
+    save_settings_values(['schema_bumps' => '4']);
 }
 /** 二级分类：子版块 ID 清单（版块层级固定两层） */
 function forum_child_ids(int $fid, bool $viewable_only = false): array
@@ -1785,8 +1792,12 @@ function save_topic(): int
             $body = (string)($t['body'] ?? '');
         }
         $reply_order = (int)($_POST['reply_order'] ?? 0) === 1 ? 1 : 0;
-        Database::connection()->transaction(static function () use ($topic_id, $fid, $title, $body, $reply_order): void {
-            Topic::whereKey($topic_id)->update(['forum_id' => $fid, 'title' => $title, 'body' => $body, 'reply_order' => $reply_order]);
+        // 标题/正文真的变了才记内容更新时间：驱动 sitemap lastmod、JSON-LD dateModified 与 TDK/翻译队列重排
+        $content_changed = trim((string)$t['title']) !== $title || trim((string)$t['body']) !== $body;
+        Database::connection()->transaction(static function () use ($topic_id, $fid, $title, $body, $reply_order, $content_changed): void {
+            $data = ['forum_id' => $fid, 'title' => $title, 'body' => $body, 'reply_order' => $reply_order];
+            if ($content_changed) $data['content_updated_at'] = now();
+            Topic::whereKey($topic_id)->update($data);
         });
         return $topic_id;
     }
@@ -2476,7 +2487,7 @@ function topic_page(): void
             'headline' => (string)$t['title'],
             'inLanguage' => current_lang() === DEFAULT_LANG ? 'zh-CN' : current_lang(),
             'datePublished' => sitemap_w3c((int)$t['created_at']),
-            'dateModified' => sitemap_w3c(max((int)$t['created_at'], (int)($t['last_reply_at'] ?: 0))),
+            'dateModified' => sitemap_w3c(max((int)$t['created_at'], (int)($t['last_reply_at'] ?: 0), (int)($t['content_updated_at'] ?? 0))),
             'author' => [
                 '@type' => 'Person',
                 'name' => (string)($t['username'] ?? ''),
@@ -2697,7 +2708,7 @@ function sitemap_page_url_langs(string $route, array $params = [], int $lastmod 
 /** 主题的 <lastmod>：回帖会刷新 last_reply_at，取两者较大值兜底（旧数据可能为 0） */
 function sitemap_topic_lastmod(array $t): int
 {
-    return max((int)($t['last_reply_at'] ?? 0), (int)($t['created_at'] ?? 0));
+    return max((int)($t['last_reply_at'] ?? 0), (int)($t['created_at'] ?? 0), (int)($t['content_updated_at'] ?? 0));
 }
 
 /** 机器可读出口（sitemap）：与 json_response 同级的直出，不走 render_page */
@@ -2739,7 +2750,7 @@ function sitemap_root_route(): void
     // 协议单文件上限 5 万条：主题按 id 升序填满剩余额度，装不下的仍可经 /sitemap-topics-{n}.xml 单独提交
     $remaining = SITEMAP_MAX_URLS - count($urls);
     if ($forum_ids && $remaining > 0) {
-        $rows = Topic::whereIn('forum_id', $forum_ids)->orderBy('id')->limit($remaining)->get(['id', 'created_at', 'last_reply_at']);
+        $rows = Topic::whereIn('forum_id', $forum_ids)->orderBy('id')->limit($remaining)->get(['id', 'created_at', 'last_reply_at', 'content_updated_at']);
         foreach ($rows as $t) {
             $urls = array_merge($urls, sitemap_page_url_langs('topic', ['id' => (int)$t->id], sitemap_topic_lastmod($t->toArray())));
         }
@@ -2766,7 +2777,7 @@ function sitemap_topics_route(int $page): void
     $total = (clone $query)->count();
     if ($page < 1 || $page > max(1, (int)ceil($total / SITEMAP_TOPICS_PER_FILE))) err('你访问的页面不存在', 404);
     $rows = $query->orderBy('id')->limit(SITEMAP_TOPICS_PER_FILE)->offset(($page - 1) * SITEMAP_TOPICS_PER_FILE)
-        ->get(['id', 'created_at', 'last_reply_at']);
+        ->get(['id', 'created_at', 'last_reply_at', 'content_updated_at']);
     $urls = [];
     foreach ($rows as $t) {
         $urls = array_merge($urls, sitemap_page_url_langs('topic', ['id' => (int)$t->id], sitemap_topic_lastmod($t->toArray())));

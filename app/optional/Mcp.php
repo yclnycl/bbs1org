@@ -414,8 +414,12 @@ final class Mcp
             if (!forum_group_allowed($forum, 'allow_post_groups')) throw new McpToolException('没有在目标版块发帖的权限', 'denied');
             $fid = $target_fid;
         }
-        Database::connection()->transaction(static function () use ($tid, $fid, $title, $body): void {
-            Topic::whereKey($tid)->update(['forum_id' => $fid, 'title' => $title, 'body' => $body]);
+        // 标题/正文变了就记内容更新时间：自动化每日改数据的帖子靠它刷新 sitemap lastmod 并重进 TDK/翻译队列
+        $content_changed = trim((string)$t['title']) !== $title || trim((string)$t['body']) !== $body;
+        Database::connection()->transaction(static function () use ($tid, $fid, $title, $body, $content_changed): void {
+            $data = ['forum_id' => $fid, 'title' => $title, 'body' => $body];
+            if ($content_changed) $data['content_updated_at'] = now();
+            Topic::whereKey($tid)->update($data);
         });
         return self::json_text(['topic_id' => $tid, 'forum_id' => $fid, 'url' => absolute_url(route_url('topic', ['id' => $tid])), 'message' => '主题已更新']);
     }

@@ -2693,6 +2693,9 @@ function topic_page(): void
         }
     }
     $p = max(1, (int)($_GET['p'] ?? 1));
+    // 页码越界一律 302 收敛回有效末页：超范围页只会渲染空回帖列表，收进索引就是软空页
+    $max_p = max(1, (int)ceil((int)$t['reply_count'] / $size));
+    if ($p > $max_p) go(route_url('topic', ['id' => (int)$t['id'], 'p' => $max_p > 1 ? $max_p : null]));
     $off = ($p - 1) * $size;
     $page_data = topic_page_replies($t, $p, $size, $off, $reply_desc);
     $t = $page_data['topic'];
@@ -3417,7 +3420,8 @@ try {
     } else {
         $message = '操作失败';
     }
-    err($message);
+    // 未捕获异常是服务器侧故障：返回 500 让搜索引擎别把兜底错误页当正文收进索引（此前软 200）
+    err($message, 500);
 }
 // 响应已交付：流量触发的 TDK 队列批处理（限频 + 租约互斥，见 tdk_cron_tick / TopicTDK::process_batch）
 tdk_cron_tick();

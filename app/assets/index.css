@@ -3622,6 +3622,20 @@ table.list{
         --measure: 100%
     }
 
+    /* 分页条：移动端改左对齐横滚。居中 + overflow 滚动时左侧页码永远滚不到（flex 居中溢出经典问题），
+       页码直达表单吸附右缘，滚到哪都能直接跳页 */
+    .pagination{
+        justify-content: flex-start
+    }
+
+    .pagination .pagination-jump{
+        position: sticky;
+        right: 0;
+        padding-left: var(--sp-2);
+        background: var(--surface);
+        box-shadow: -10px 0 10px -8px rgba(18,22,28,.28)
+    }
+
     .wrap{
         padding: var(--sp-2)
     }

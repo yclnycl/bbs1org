@@ -49,6 +49,9 @@ final class Markdown
             // 限制嵌套深度，避免深层嵌套把解析栈打爆
             'max_nesting_level' => 100,
             'default_attributes' => [
+                // strict_callables：字符串属性值按字面量输出。不开的话 "lazy" 会被当可调用对象
+                // 调用，任何含图片的帖子渲染详情页直接 500（league/commonmark 2.x 默认行为）
+                'strict_callables' => true,
                 Image::class => ['loading' => 'lazy', 'referrerpolicy' => 'no-referrer'],
                 // Google SEO 指南：论坛正文属用户生成内容，站外链接一律 nofollow ugc 不导权；
                 // 站内相对链接（提及、楼层、引用主题）保持可跟随，闭包返回 null 即不写 rel

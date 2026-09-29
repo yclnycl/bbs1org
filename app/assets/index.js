@@ -806,3 +806,12 @@ if (heroCarousel) {
     window.addEventListener("resize", () => heroGoTo(heroIndex));
     heroStart();
 }
+
+/* 移动端分页条：加载后把当前页码滚进可视区（横滚条不会自动定位，当前页常被裁在右侧外面）。
+   只改分页条自身的 scrollLeft，避免 scrollIntoView 连带把页面竖向滚走 */
+const activePageLink = document.querySelector(".pagination li.active");
+const paginationStrip = activePageLink ? activePageLink.closest(".pagination") : null;
+if (activePageLink && paginationStrip) {
+    paginationStrip.scrollLeft = Math.max(0,
+        activePageLink.offsetLeft - (paginationStrip.clientWidth - activePageLink.offsetWidth) / 2);
+}

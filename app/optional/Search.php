@@ -17,7 +17,8 @@ final class Search
      */
     public static function page(): void
     {
-        if (!uid()) err('请登录后操作');
+        // 搜索对游客开放：内容本就公开可读，收费版块打码在结果组装时同口径处理；
+        // 详情页 JSON-LD 的 SearchAction 指向这里，游客被拦等于结构化数据承诺落空
         $submitted = is_post_request() || array_key_exists('q', $_GET);
         $max = length_limit('search', 'max');
         $query = $submitted
@@ -29,7 +30,8 @@ final class Search
         $has_prev = false;
         $has_next = false;
         if ($query !== '' && $submitted) {
-            if ($page === 1) {
+            if ($page === 1 && uid()) {
+                // 首页限频只挂登录用户（依赖 last_post_at），游客 GET 查询公开数据不限流
                 $seconds = post_interval_seconds();
                 if ($seconds > 0) {
                     $wait = $seconds - (time() - (int)(User::whereKey(uid())->value('last_post_at') ?? 0));
@@ -76,6 +78,9 @@ final class Search
             'has_next' => $has_next,
             'page' => $page,
             'tag_match' => $tag_match,
-        ], '搜索');
+            // 热门话题词快捷入口（中文页 only：英文站的内容检索以话题聚合页为主）
+            'hot_tags' => current_lang() === DEFAULT_LANG ? TopicTags::hot(12) : [],
+        // 搜索结果页是站内功能页，不进索引
+        ], '搜索', ['noindex' => true]);
     }
 }

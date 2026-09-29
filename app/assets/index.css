@@ -4813,3 +4813,20 @@ table.list{
     max-width: 100%;
     height: auto
 }
+
+/* 搜索页「大家都在搜」热门话题词入口 */
+.search-hot{
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    margin: var(--sp-3) 0 0
+}
+
+.search-hot-label{
+    font-size: var(--fs-sm);
+    color: var(--ink-4)
+}
+
+.search-hot .tag-strip{
+    margin: 0
+}

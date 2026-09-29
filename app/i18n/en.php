@@ -55,6 +55,7 @@ return [
     '焦点推荐列表' => 'Featured stories',
     '查看全文' => 'Read more',
     '广告' => 'Ad',
+    '大家都在搜' => 'Trending searches',
 
     // 列表与时间
     '新评论' => 'Latest comments',

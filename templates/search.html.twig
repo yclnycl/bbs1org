@@ -13,6 +13,14 @@
                     </div>
                 </form>
                 <p class="search-page-hint">{{ '一次命中帖子标题、正文与回帖，相关内容自动展开并标红。'|t }}</p>
+                {% if hot_tags %}
+                    <div class="search-hot">
+                        <span class="search-hot-label">{{ '大家都在搜'|t }}</span>
+                        <div class="tag-strip">
+                            {% for tg in hot_tags %}<a class="tag-chip" href="{{ route_url('tag', {kw: tg}) }}">{{ tg }}</a>{% endfor %}
+                        </div>
+                    </div>
+                {% endif %}
             </div>
             {% if submitted and query == '' %}
                 <div class="empty-state">{{ '请输入搜索关键词'|t }}</div>

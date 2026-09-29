@@ -3088,56 +3088,84 @@ function llms_txt_route(): void
 }
 /** 百度主动推送（data.zz.baidu.com/urls）：新站日配额很小（实测 10 条/天），每小时最多一轮、每轮最多 5 条：
  *  先推游标之后的新主题，配额有余再轮转话题页；命中 over quota 就退避到明天。token 在后台「话题词」tab 配置 */
+/** 百度主动推送（data.zz.baidu.com/urls）：新站日配额 10 条、按北京日重置。
+ *  每小时探测一轮：今日已推满则 6 小时后再看；否则一把推「剩余配额」条（新主题优先，话题页轮转）。
+ *  over quota 时批次减半下小时重试（外部消耗过配额时自动收敛到真实余量）。token 在后台「话题词」tab 配置 */
 function baidu_push_tick(): void
 {
     if (PHP_SAPI === 'cli') return;
     if (now() < (int)setting('baidu_push_next_run', '0')) return;
     save_settings_values(['baidu_push_next_run' => (string)(now() + 3600)]);
-    $token = trim((string)setting('baidu_push_token', ''));
-    if ($token === '') return;
+    if (trim((string)setting('baidu_push_token', '')) === '') return;
+    BaiduPush::ensure_schema();
+    $pushed = BaiduPush::pushed_today();
+    if ($pushed >= BaiduPush::DAILY_QUOTA) {
+        // 今日配额用满：6 小时粒度探测，北京日翻转后自动恢复
+        save_settings_values(['baidu_push_next_run' => (string)(now() + 6 * 3600)]);
+        return;
+    }
+    // 批次默认一把推满剩余配额；over quota 会减半（baidu_push_batch），成功后恢复
+    $batch = min(BaiduPush::DAILY_QUOTA - $pushed, max(1, (int)setting('baidu_push_batch', '0') ?: BaiduPush::DAILY_QUOTA));
+    [$urls, $topic_cursor, $tag_cursor] = baidu_push_pick_urls($batch);
+    if (!$urls) return;
+    [$ok, $message, $success] = baidu_push_urls_now($urls);
+    save_settings_values(['baidu_push_last_result' => $message, 'baidu_push_last_run' => (string)now()]);
+    if ($ok) {
+        save_settings_values(['baidu_push_batch' => '', 'baidu_push_last_topic_id' => (string)$topic_cursor,
+                              'baidu_push_tag_cursor' => (string)$tag_cursor]);
+        if ($pushed + $success >= BaiduPush::DAILY_QUOTA) {
+            save_settings_values(['baidu_push_next_run' => (string)(now() + 6 * 3600)]);
+        }
+    } elseif ($message === 'over quota') {
+        // 配额被外部消耗或整批超余量：减半收敛；减到 1 还超就视为今日额度耗尽
+        if ($batch > 1) {
+            save_settings_values(['baidu_push_batch' => (string)max(1, intdiv($batch, 2))]);
+        } else {
+            save_settings_values(['baidu_push_next_run' => (string)(now() + 6 * 3600)]);
+        }
+    }
+    // 其他错误（网络等）：游标不动，下小时原样重试
+}
+
+/** 挑选本轮要推的 URL：游标之后的新主题优先，不足用话题页轮转补齐。游标只在推送成功后由调用方写回 */
+function baidu_push_pick_urls(int $batch): array
+{
     $urls = [];
-    // 游标缺省（首次启用）从当前最新主题起推，不回头推历史存量
     $last_raw = setting('baidu_push_last_topic_id', '');
     $last_id = $last_raw !== '' ? (int)$last_raw : (int)Topic::max('id');
-    if ($last_raw === '') {
-        save_settings_values(['baidu_push_last_topic_id' => (string)$last_id]);
-    }
-    $rows = Topic::where('id', '>', $last_id)->orderBy('id')->limit(5)->get(['id']);
+    $topic_cursor = $last_id;
+    $rows = Topic::where('id', '>', $last_id)->orderBy('id')->limit($batch)->get(['id']);
     foreach ($rows as $t) {
         $urls[] = absolute_url(route_url('topic', ['id' => (int)$t->id]));
     }
     if ($rows->isNotEmpty()) {
-        save_settings_values(['baidu_push_last_topic_id' => (string)$rows->last()->id]);
+        $topic_cursor = (int)$rows->last()->id;
     }
-    $quota = 5 - count($urls);
+    $tag_cursor = (int)setting('baidu_push_tag_cursor', '0');
+    $quota = $batch - count($urls);
     $tags = $quota > 0 ? TopicTags::active() : [];
     if ($tags) {
-        $cursor = (int)setting('baidu_push_tag_cursor', '0');
         for ($i = 0; $i < $quota; $i++) {
-            $tag_row = $tags[($cursor + $i) % count($tags)];
+            $tag_row = $tags[($tag_cursor + $i) % count($tags)];
             $urls[] = absolute_url(route_url('tag', ['kw' => (string)$tag_row['keyword']], DEFAULT_LANG));
         }
-        save_settings_values(['baidu_push_tag_cursor' => (string)(($cursor + $quota) % count($tags))]);
+        $tag_cursor = ($tag_cursor + $quota) % count($tags);
     }
-    if (!$urls) return;
-    [$ok, $message] = baidu_push_urls_now($urls);
-    save_settings_values(['baidu_push_last_result' => $message, 'baidu_push_last_run' => (string)now()]);
-    if (!$ok && $message === 'over quota') {
-        // 日配额用完：明天再推（配额按天重置）
-        save_settings_values(['baidu_push_next_run' => (string)(now() + 86400)]);
-    }
+    return [$urls, $topic_cursor, $tag_cursor];
 }
 
-/** 单次百度推送（data.zz.baidu.com/urls，text/plain 批量）：返回 [是否成功, 结果描述]，尽力而为不抛异常 */
+/** 单次百度推送（data.zz.baidu.com/urls，text/plain 批量）：返回 [是否成功, 结果描述, 实际接收条数]，记日志不抛异常 */
 function baidu_push_urls_now(array $urls): array
 {
     $token = trim((string)setting('baidu_push_token', ''));
-    if ($token === '' || !$urls) return [false, '未配置 token 或无 URL'];
+    if ($token === '' || !$urls) return [false, '未配置 token 或无 URL', 0];
     $site = trim((string)setting('baidu_push_site', '')) ?: rtrim(base_url(), '/');
     $context = stream_context_create(['http' => [
         'method' => 'POST',
-        'header' => "Content-Type: text/plain\r\n",
-        'content' => implode("\n", $urls),
+        'header' => "Content-Type: text/plain
+",
+        'content' => implode("
+", $urls),
         'timeout' => 10,
         'ignore_errors' => true,
     ]]);
@@ -3146,11 +3174,18 @@ function baidu_push_urls_now(array $urls): array
         $resp = @file_get_contents('http://data.zz.baidu.com/urls?site=' . $site . '&token=' . rawurlencode($token), false, $context);
         $data = $resp !== false ? json_decode((string)$resp, true) : null;
         if (is_array($data) && isset($data['success'])) {
-            return [true, 'success ' . (int)$data['success'] . ', remain ' . (int)($data['remain'] ?? 0)];
+            $success = (int)$data['success'];
+            $message = 'success ' . $success . ', remain ' . (int)($data['remain'] ?? 0);
+            BaiduPush::log($urls, $success, true, $message);
+            return [true, $message, $success];
         }
-        return [false, (string)($data['message'] ?? ($resp !== false ? mb_substr((string)$resp, 0, 120) : '请求失败'))];
+        $message = (string)($data['message'] ?? ($resp !== false ? mb_substr((string)$resp, 0, 120) : '请求失败'));
+        BaiduPush::log($urls, 0, false, $message);
+        return [false, $message, 0];
     } catch (Throwable $e) {
-        return [false, mb_substr($e->getMessage(), 0, 120)];
+        $message = mb_substr($e->getMessage(), 0, 120);
+        BaiduPush::log($urls, 0, false, $message);
+        return [false, $message, 0];
     }
 }
 

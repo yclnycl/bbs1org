@@ -298,7 +298,10 @@ final class Admin
                 'baidu' => ['token_set' => trim((string)setting('baidu_push_token', '')) !== '',
                             'site' => (string)setting('baidu_push_site', ''),
                             'last_result' => (string)setting('baidu_push_last_result', ''),
-                            'last_run' => (int)setting('baidu_push_last_run', '0')]];
+                            'last_run' => (int)setting('baidu_push_last_run', '0'),
+                            'pushed_today' => \app\optional\BaiduPush::pushed_today(),
+                            'quota' => \app\optional\BaiduPush::DAILY_QUOTA,
+                            'logs' => \app\optional\BaiduPush::recent(12)]];
         // 看板表格里展示解码后的关键词而不是百分号编码 URL
         foreach (($gsc['perf']['tag_pages'] ?? []) as $i => $page) {
             $path = (string)parse_url((string)$page['url'], PHP_URL_PATH);

@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 use app\optional\Admin;
+use app\optional\BaiduPush;
 use app\optional\Bootstrap;
 use app\optional\Db\Database;
 use app\optional\Db\SqlitePdo;

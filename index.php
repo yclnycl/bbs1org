@@ -3142,7 +3142,8 @@ function baidu_push_urls_now(array $urls): array
         'ignore_errors' => true,
     ]]);
     try {
-        $resp = @file_get_contents('http://data.zz.baidu.com/urls?site=' . rawurlencode($site) . '&token=' . rawurlencode($token), false, $context);
+        // site 参数必须原样字面量（含 : //），URL 编码反而会被百度判成 site init fail
+        $resp = @file_get_contents('http://data.zz.baidu.com/urls?site=' . $site . '&token=' . rawurlencode($token), false, $context);
         $data = $resp !== false ? json_decode((string)$resp, true) : null;
         if (is_array($data) && isset($data['success'])) {
             return [true, 'success ' . (int)$data['success'] . ', remain ' . (int)($data['remain'] ?? 0)];

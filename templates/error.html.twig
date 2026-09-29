@@ -1,11 +1,27 @@
 {% extends 'layout.html.twig' %}
 {% import 'macros/ui.html.twig' as ui %}
+{% import 'macros/form.html.twig' as f %}
 {% block content %}
     <div class="home-shell"><div class="forum-layout forum-layout-has-sidebar">
         <div class="forum-main"><div class="main-panel">
             <div class="form-panel form-error-panel">
                 <h2>{{ error_title }}</h2>
                 <p>{{ message != '' ? message : error_title }}</p>
+                {# 404/错误页恢复路径：站内搜索 + 热门话题词 + 返回首页，别让来访用户（和爬虫）停在死胡同 #}
+                <div class="error-recover">
+                    <form class="search-page-form" method="get" action="{{ route_url('search') }}" data-no-ajax="1">
+                        <div class="search-page-query">
+                            <input type="search" name="q" placeholder="{{ '搜索感兴趣的内容'|t }}" maxlength="80">
+                            <button type="submit">{{ '搜索'|t }}</button>
+                        </div>
+                    </form>
+                    {% if footer_tags %}
+                    <div class="tag-strip error-recover-tags">
+                        {% for tg in footer_tags %}<a class="tag-chip" href="{{ route_url('tag', {kw: tg}) }}">{{ tg }}</a>{% endfor %}
+                    </div>
+                    {% endif %}
+                    <p class="error-recover-home"><a href="{{ route_url('home') }}">{{ '← 返回首页'|t }}</a></p>
+                </div>
             </div>
         </div></div>
         <aside class="sidebar">{{ ui.user_card() }}</aside>

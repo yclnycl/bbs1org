@@ -56,6 +56,8 @@ return [
     '查看全文' => 'Read more',
     '广告' => 'Ad',
     '大家都在搜' => 'Trending searches',
+    '搜索感兴趣的内容' => 'Search what interests you',
+    '← 返回首页' => '← Back to home',
 
     // 列表与时间
     '新评论' => 'Latest comments',

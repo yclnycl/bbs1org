@@ -3,6 +3,7 @@
 {% block content %}
     <div class="home-shell tag-page"><div class="forum-layout">
         <div class="forum-main"><div class="main-panel">
+            <div class="breadcrumb"><a href="{{ route_url('home') }}">{{ '首页'|t }}</a><span>/</span><span>{{ display_title }}</span></div>
             <header class="list-heading tag-page-head">
                 <h1 class="list-title">{{ display_title }}</h1>
                 {% if display_summary %}<p class="list-sub">{{ display_summary }}</p>{% endif %}

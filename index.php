@@ -2370,6 +2370,27 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
         $seo['noindex'] = trim((string)($filter_user['bio'] ?? '')) === ''
             && !Topic::where('user_id', $profile_uid)->exists()
             && !Reply::where('user_id', $profile_uid)->exists();
+        // 作者实体页：ProfilePage 把作者声明为独立实体，AI 检索「谁在说」时有据可依
+        if (!$seo['noindex']) {
+            $user_url = absolute_url(route_url('user', ['id' => $profile_uid]));
+            $person = [
+                '@type' => 'Person',
+                'name' => (string)$filter_user['username'],
+                'url' => $user_url,
+            ];
+            if (trim((string)($filter_user['bio'] ?? '')) !== '') $person['description'] = (string)$filter_user['bio'];
+            $seo['jsonld'] = [
+                [
+                    '@context' => 'https://schema.org',
+                    '@type' => 'ProfilePage',
+                    '@id' => $user_url . '#profile',
+                    'url' => $user_url,
+                    'inLanguage' => current_lang() === DEFAULT_LANG ? 'zh-CN' : current_lang(),
+                    'mainEntity' => $person,
+                    'isPartOf' => ['@id' => rtrim(base_url(), '/') . '/#website'],
+                ],
+            ];
+        }
     } elseif ($filter_forum) {
         $seo = page_seo('forum', ['id' => $fid] + ($p > 1 ? ['p' => $p] : []), trim((string)$filter_forum['description']) !== ''
             ? (string)$filter_forum['description']
@@ -2435,6 +2456,21 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
                 'url' => absolute_url($c['url']),
                 'name' => $c['title'],
             ], array_keys($carousel_rows), array_values($carousel_rows)),
+        ];
+    }
+    // 版块页 ItemList：与话题页同口径，把当前页真实可见的前 10 条主题声明成结构化列表
+    if ($filter_forum && $list_rows !== []) {
+        $seo['jsonld'][] = [
+            '@context' => 'https://schema.org',
+            '@type' => 'ItemList',
+            'name' => (string)$filter_forum['name'],
+            'numberOfItems' => min(10, count($list_rows)),
+            'itemListElement' => array_map(static fn(int $i, array $row): array => [
+                '@type' => 'ListItem',
+                'position' => $i + 1,
+                'url' => absolute_url(route_url('topic', ['id' => (int)$row['id']])),
+                'name' => (string)$row['title'],
+            ], array_keys(array_slice($list_rows, 0, 10)), array_slice(array_values($list_rows), 0, 10)),
         ];
     }
     $empty_text = $q !== '' ? '没有找到匹配的' . ($search_field === 'reply' ? '回帖' : '主题') : ((string)$data['profile_empty'] !== '' ? (string)$data['profile_empty'] : ($profile_uid ? ($profile_tab === 'replies' ? '暂无回帖' : '暂无主题') : '暂无主题'));

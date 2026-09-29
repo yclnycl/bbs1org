@@ -10,6 +10,9 @@
             <div class="post-topic-title">
                 <h1 class="post-content-title"><a href="{{ topic_url }}">{{ t.title }}</a></h1>
                 {{ ui.stats(t.view_count, t.reply_count) }}
+                <button type="button" class="copy-link-btn" data-copy-link="{{ copy_link }}" title="{{ '复制链接'|t }}" aria-label="{{ '复制链接'|t }}">
+                    <svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="7" y="7" width="9" height="10" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M13 4H6a2 2 0 0 0-2 2v8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>{{ '复制链接'|t }}
+                </button>
             </div>
             {% if i18n_pending %}<div class="i18n-pending">{{ '该内容暂无英文译文，以下为中文原文，译文生成后会自动替换。'|t }}</div>{% endif %}
             <ul class="post-list topic-post-list">

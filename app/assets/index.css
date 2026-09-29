@@ -4858,3 +4858,29 @@ table.list{
 .error-recover-home a{
     color: var(--brand-strong)
 }
+
+/* 轮播置顶徽标与详情页复制链接按钮 */
+.hero-pinned{
+    color: var(--warning);
+    background: var(--warning-soft)
+}
+
+.copy-link-btn{
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 26px;
+    padding: 0 var(--sp-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    color: var(--ink-3);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    transition: border-color var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease)
+}
+
+.copy-link-btn:hover{
+    border-color: var(--brand);
+    color: var(--brand-strong)
+}

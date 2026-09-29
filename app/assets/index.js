@@ -815,3 +815,25 @@ if (activePageLink && paginationStrip) {
     paginationStrip.scrollLeft = Math.max(0,
         activePageLink.offsetLeft - (paginationStrip.clientWidth - activePageLink.offsetWidth) / 2);
 }
+
+/* 详情页「复制链接」：优先 clipboard API，降级 execCommand，结果用 toast 反馈 */
+document.addEventListener("click", e => {
+    const btn = e.target.closest("[data-copy-link]");
+    if (!btn) return;
+    const url = btn.dataset.copyLink || location.href;
+    const done = ok => showToast(ok ? "\u94fe\u63a5\u5df2\u590d\u5236" : "\u590d\u5236\u5931\u8d25");
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(url).then(() => done(true), () => done(false));
+    } else {
+        const ta = document.createElement("textarea");
+        ta.value = url;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        let ok = false;
+        try { ok = document.execCommand("copy"); } catch { ok = false; }
+        ta.remove();
+        done(ok);
+    }
+});

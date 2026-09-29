@@ -58,6 +58,9 @@ return [
     '大家都在搜' => 'Trending searches',
     '搜索感兴趣的内容' => 'Search what interests you',
     '← 返回首页' => '← Back to home',
+    '复制链接' => 'Copy link',
+    '链接已复制' => 'Link copied',
+    '复制失败' => 'Copy failed',
 
     // 列表与时间
     '新评论' => 'Latest comments',

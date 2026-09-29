@@ -2233,19 +2233,25 @@ function plain_text_excerpt(string $text, int $length): string
     return rtrim(mb_substr(trim((string)$text), 0, $length, 'UTF-8'), '，。、；！？,.;!?');
 }
 
-/** 首页焦点轮播数据：近 30 天浏览最多的主题，不足时用全站热门补齐；摘要优先取 TDK/译文描述 */
+/** 首页焦点轮播数据：后台置顶帖优先，其余按近 30 天浏览量补齐；摘要优先取 TDK/译文描述 */
 function home_carousel_rows(int $count): array
 {
     $count = max(3, min(8, $count));
+    $columns = ['id', 'title', 'body', 'forum_id', 'view_count', 'reply_count', 'created_at'];
     $pick = static fn(bool $recent): array => Topic::query()
         ->when($recent, static fn($q) => $q->where('created_at', '>=', now() - 30 * 86400))
         ->orderByDesc('view_count')->orderByDesc('id')->limit($count)
-        ->get(['id', 'title', 'body', 'forum_id', 'view_count', 'reply_count', 'created_at'])
-        ->map->toArray()->all();
-    $rows = $pick(true);
-    if (count($rows) < $count) {
-        $have = array_flip(array_column($rows, 'id'));
-        foreach ($pick(false) as $t) {
+        ->get($columns)->map->toArray()->all();
+    // 置顶帖是管理员选定的运营位：轮播头部优先给它们（列表页排序同口径），再按热度补足
+    $pinned_ids = array_slice(pinned_topic_ids(), 0, $count);
+    $pinned_set = array_flip($pinned_ids);
+    $rows = $pinned_ids ? Topic::query()->whereIn('id', $pinned_ids)
+        ->orderByDesc('view_count')->orderByDesc('id')->limit($count)
+        ->get($columns)->map->toArray()->all() : [];
+    $have = array_flip(array_column($rows, 'id'));
+    foreach ([true, false] as $recent) {
+        if (count($rows) >= $count) break;
+        foreach ($pick($recent) as $t) {
             if (isset($have[$t['id']])) continue;
             $rows[] = $t;
             if (count($rows) >= $count) break;
@@ -2287,6 +2293,7 @@ function home_carousel_rows(int $count): array
             'excerpt' => $excerpt,
             'forum_name' => (string)$forum['name'],
             'forum_url' => (int)$forum['id'] > 0 ? route_url('forum', ['id' => (int)$forum['id']]) : '',
+            'is_pinned' => isset($pinned_set[(int)$t['id']]),
             'time' => (int)$t['created_at'],
             'view_count' => (int)$t['view_count'],
             'reply_count' => (int)$t['reply_count'],
@@ -2659,6 +2666,7 @@ function topic_page_view(array $view): array
         't' => $t,
         'forum' => $forum,
         'topic_url' => route_url('topic', ['id' => (int)$t['id']]),
+        'copy_link' => absolute_url(route_url('topic', ['id' => (int)$t['id']])),
         'page' => $p,
         'replies' => $replies,
         'reply_rows' => $reply_rows,

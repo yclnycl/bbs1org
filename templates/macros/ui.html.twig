@@ -195,7 +195,7 @@
 {%- endif -%}
 {% endmacro %}
 
-{% macro user_card(m, reply_button, fid) %}
+{% macro user_card(m, reply_button, fid = null) %}
 {%- set m = m ?: me() -%}
 {%- if not m -%}
 <div class="card sidebar-card user-card"><div class="user-wrap"><div class="user-header"><div class="user-header-info"><div class="user-avatar-big visitor-avatar">P</div><div><div class="user-name">{{ '访客'|t }}</div><div class="user-rank">{{ '请登录后发帖'|t }}</div></div></div></div><div class="side-auth{{ setting('allow_register', '1') == '1' ? '' : ' single' }}"><a href="{{ route_url('login') }}">{{ '登录'|t }}</a>{% if setting('allow_register', '1') == '1' %}<a href="{{ route_url('register') }}">{{ '注册'|t }}</a>{% endif %}</div></div></div>

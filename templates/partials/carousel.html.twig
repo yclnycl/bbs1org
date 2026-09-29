@@ -6,6 +6,7 @@
         <article class="hero-slide" aria-label="{{ loop.index }} / {{ carousel_rows|length }}">
             <a class="hero-card" href="{{ c.url }}">
                 <div class="hero-kicker">
+                    {% if c.is_pinned %}<span class="hero-forum hero-pinned">{{ '置顶'|t }}</span>{% endif %}
                     {% if c.forum_name != '' %}<span class="hero-forum">{{ c.forum_name }}</span>{% endif %}
                     <span class="hero-time">{{ human_time(c.time) }}</span>
                 </div>

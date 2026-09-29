@@ -50,6 +50,12 @@ return [
     '+ 发帖' => '+ New post',
     '发帖' => 'Post',
 
+    // 首页轮播与广告位
+    '焦点推荐' => 'Featured',
+    '焦点推荐列表' => 'Featured stories',
+    '查看全文' => 'Read more',
+    '广告' => 'Ad',
+
     // 列表与时间
     '新评论' => 'Latest comments',
     '新帖子' => 'Latest posts',

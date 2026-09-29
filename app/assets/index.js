@@ -769,3 +769,40 @@ if (contactQrUrl) {
         if (e.target.closest(".contact-masked")) openContactQrModal();
     });
 }
+
+/* 首页焦点轮播：自动轮换 + 圆点跳转，悬停/聚焦/触屏暂停，尊重系统减少动效偏好 */
+const heroCarousel = document.getElementById("hero-carousel");
+if (heroCarousel) {
+    const track = heroCarousel.querySelector(".hero-track");
+    const slides = Array.from(track.children);
+    const dots = Array.from(heroCarousel.querySelectorAll(".hero-dot"));
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let heroIndex = 0, heroTimer = null;
+    const heroGoTo = i => {
+        heroIndex = (i + slides.length) % slides.length;
+        track.scrollTo({left: heroIndex * track.clientWidth, behavior: reduced ? "auto" : "smooth"});
+        dots.forEach((d, di) => d.classList.toggle("active", di === heroIndex));
+    };
+    const heroStop = () => { if (heroTimer) { clearInterval(heroTimer); heroTimer = null; } };
+    const heroStart = () => { if (!reduced && !heroTimer && document.visibilityState === "visible") heroTimer = setInterval(() => heroGoTo(heroIndex + 1), 5000); };
+    const heroRestart = () => { heroStop(); heroStart(); };
+    dots.forEach(d => d.addEventListener("click", () => { heroGoTo(+d.dataset.slide); heroRestart(); }));
+    // 手动滑动时同步圆点（scroll 事件里按滚动位置反推当前屏）
+    track.addEventListener("scroll", () => {
+        if (track.clientWidth === 0) return;
+        const i = Math.round(track.scrollLeft / track.clientWidth);
+        if (i !== heroIndex && i >= 0 && i < slides.length) {
+            heroIndex = i;
+            dots.forEach((d, di) => d.classList.toggle("active", di === i));
+        }
+    }, {passive: true});
+    heroCarousel.addEventListener("pointerenter", heroStop);
+    heroCarousel.addEventListener("pointerleave", heroStart);
+    heroCarousel.addEventListener("focusin", heroStop);
+    heroCarousel.addEventListener("focusout", heroStart);
+    track.addEventListener("touchstart", heroStop, {passive: true});
+    document.addEventListener("visibilitychange", () => document.visibilityState === "visible" ? heroStart() : heroStop());
+    // 图片懒加载导致的宽度变化不影响布局（flex 定宽），但窗口缩放后要吸附回当前屏
+    window.addEventListener("resize", () => heroGoTo(heroIndex));
+    heroStart();
+}

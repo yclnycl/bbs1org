@@ -1,0 +1,13 @@
+{% extends 'admin/layout.html.twig' %}
+{% import 'macros/form.html.twig' as f %}
+{% block admin_body %}
+    <div class="form-panel settings-form">
+        <h2>广告位</h2>
+        <p class="settings-help">各槽位接受任意 HTML 片段（联盟广告代码、自营横幅、图片链接均可），保存后原样输出到对应位置，<strong>留空即下线该广告位</strong>。内容仅站长可配置，请自行确保代码来源可信；广告联盟代码建议开启异步加载，避免拖慢页面。</p>
+        <form method="post">
+            {{ f.token() }}
+            {{ f.render_fields(fields, settings) }}
+            <div class="row settings-actions"><button type="submit">保存</button></div>
+        </form>
+    </div>
+{% endblock %}

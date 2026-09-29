@@ -1,0 +1,30 @@
+{# 首页焦点轮播：热门主题卡片，横向滚动吸附 + 自动轮换（JS 在 index.js，尊重 prefers-reduced-motion） #}
+{% import 'macros/ui.html.twig' as ui %}
+<section class="hero-carousel" id="hero-carousel" aria-roledescription="carousel" aria-label="{{ '焦点推荐'|t }}">
+    <div class="hero-track" id="hero-track" tabindex="0" aria-label="{{ '焦点推荐列表'|t }}">
+        {% for c in carousel_rows %}
+        <article class="hero-slide" aria-label="{{ loop.index }} / {{ carousel_rows|length }}">
+            <a class="hero-card" href="{{ c.url }}">
+                <div class="hero-kicker">
+                    {% if c.forum_name != '' %}<span class="hero-forum">{{ c.forum_name }}</span>{% endif %}
+                    <span class="hero-time">{{ human_time(c.time) }}</span>
+                </div>
+                <h2 class="hero-title">{{ c.title }}</h2>
+                {% if c.excerpt != '' %}<p class="hero-excerpt">{{ c.excerpt }}</p>{% endif %}
+                <div class="hero-meta">
+                    <span>{{ ui.icon('view') }}{{ c.view_count }}</span>
+                    <span>{{ ui.icon('reply') }}{{ c.reply_count }}</span>
+                    <span class="hero-cta">{{ '查看全文'|t }}<svg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M4 10h11M10.5 5 15.5 10l-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                </div>
+            </a>
+        </article>
+        {% endfor %}
+    </div>
+    {% if carousel_rows|length > 1 %}
+    <div class="hero-dots">
+        {% for c in carousel_rows %}
+        <button type="button" class="hero-dot{{ loop.first ? ' active' : '' }}" data-slide="{{ loop.index0 }}" aria-label="{{ loop.index }}"></button>
+        {% endfor %}
+    </div>
+    {% endif %}
+</section>

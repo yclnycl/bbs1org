@@ -9,6 +9,14 @@
                     {% if page_h1_sub %}<p class="list-sub">{{ page_h1_sub }}</p>{% endif %}
                 </header>
             {% endif %}
+            {% if not profile_uid %}
+                {% if carousel_rows %}
+                    {% if ad_home_top != '' %}<aside class="ad-slot ad-home-top" aria-label="{{ '广告'|t }}"><span class="ad-label">{{ '广告'|t }}</span><div class="ad-body">{{ ad_home_top|raw }}</div></aside>{% endif %}
+                    {% include 'partials/carousel.html.twig' with {carousel_rows: carousel_rows} only %}
+                {% elseif ad_home_top != '' %}
+                    <aside class="ad-slot ad-home-top" aria-label="{{ '广告'|t }}"><span class="ad-label">{{ '广告'|t }}</span><div class="ad-body">{{ ad_home_top|raw }}</div></aside>
+                {% endif %}
+            {% endif %}
             {% if category_tabs %}
                 <div class="cat-tabs">{{ ui.tabs(category_tabs, category_active) }}</div>
             {% endif %}
@@ -43,12 +51,14 @@
                 {% else %}
                     {% for t in list_rows %}
                         {{ ui.topic_list_row(t, sort) }}
+                        {% if ad_in_feed != '' and loop.index == 4 %}<li class="ad-slot ad-infeed" aria-label="{{ '广告'|t }}"><span class="ad-label">{{ '广告'|t }}</span><div class="ad-body">{{ ad_in_feed|raw }}</div></li>{% endif %}
                     {% endfor %}
                 {% endif %}
             </ul>
             {% if pagination %}<div class="pagination-bar">{{ pagination.kind == 'simple' ? ui.simple_pagination(pagination.has_prev, pagination.has_next, pagination.page, pagination.url, pagination.limited) : ui.pagination(pagination.total, pagination.page, pagination.size, pagination.url, pagination.limited, pagination.hidden|default([])) }}</div>{% endif %}
         </div></div>
         <aside class="sidebar">{{ ui.user_card(sidebar_user, false, fid) }}
+            {% if ad_sidebar != '' %}<aside class="ad-slot ad-sidebar" aria-label="{{ '广告'|t }}"><span class="ad-label">{{ '广告'|t }}</span><div class="ad-body">{{ ad_sidebar|raw }}</div></aside>{% endif %}
             {% if tag_chips %}
                 <div class="side-tags">
                     <h3 class="side-tags-title">{{ '产业链话题'|t }}</h3>

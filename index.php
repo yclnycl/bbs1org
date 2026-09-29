@@ -235,6 +235,14 @@ function default_settings(): array
         'reply_body_min_length' => '1', 'reply_body_max_length' => (string)DB_TEXT_MAX_LENGTH,
         'excerpt_length' => '200',
         'post_interval_seconds' => '5',
+        // 首页焦点轮播：近 30 天最热主题自动成组，0=关闭；数量 3~8
+        'home_carousel_enabled' => '1',
+        'home_carousel_count' => '5',
+        // 广告位：后台粘贴的 HTML 片段（仅管理员可改），留空该位不渲染
+        'ad_home_top' => '',
+        'ad_sidebar' => '',
+        'ad_in_feed' => '',
+        'ad_topic_bottom' => '',
         'baidu_verification' => 'codeva-o0vee5lpeB',
         'baidu_tongji_url' => '',
         // 多语言：逗号分隔的启用语言码（不含默认语言 zh），留空=整站关闭多语言
@@ -2218,6 +2226,75 @@ function topic_index_data(int $fid, ?array $user, string $profile_tab, string $q
     ];
     return $data;
 }
+/** markdown/HTML 压成纯文本摘要：去代码块、图片与标记符号，压平空白后截断 */
+function plain_text_excerpt(string $text, int $length): string
+{
+    $text = preg_replace(['/<[^>]+>/u', '/```.*?(?:```|$)/s', '/!\[[^\]]*\]\([^)]*\)/u', '/\[([^\]]*)\]\([^)]*\)/u', '/[#>*`~_|]/u', '/\s+/u'], [' ', ' ', ' ', '$1', ' ', ' '], $text);
+    return rtrim(mb_substr(trim((string)$text), 0, $length, 'UTF-8'), '，。、；！？,.;!?');
+}
+
+/** 首页焦点轮播数据：近 30 天浏览最多的主题，不足时用全站热门补齐；摘要优先取 TDK/译文描述 */
+function home_carousel_rows(int $count): array
+{
+    $count = max(3, min(8, $count));
+    $pick = static fn(bool $recent): array => Topic::query()
+        ->when($recent, static fn($q) => $q->where('created_at', '>=', now() - 30 * 86400))
+        ->orderByDesc('view_count')->orderByDesc('id')->limit($count)
+        ->get(['id', 'title', 'body', 'forum_id', 'view_count', 'reply_count', 'created_at'])
+        ->map->toArray()->all();
+    $rows = $pick(true);
+    if (count($rows) < $count) {
+        $have = array_flip(array_column($rows, 'id'));
+        foreach ($pick(false) as $t) {
+            if (isset($have[$t['id']])) continue;
+            $rows[] = $t;
+            if (count($rows) >= $count) break;
+        }
+    }
+    if (count($rows) < 3) return [];
+    $lang = current_lang();
+    $is_zh = $lang === DEFAULT_LANG;
+    $titles = !$is_zh ? Translator::topic_titles($lang, array_column($rows, 'id')) : [];
+    $excerpt_length = min(140, max(60, excerpt_length()));
+    $items = [];
+    foreach ($rows as $t) {
+        $forum = forum_by_id((int)$t['forum_id']) ?: ['id' => 0, 'name' => '', 'paid_mode' => 0];
+        $paid = (int)($forum['paid_mode'] ?? 0) === 1 && !can_manage();
+        $title = (string)$t['title'];
+        $tdk = null;
+        // 摘要来源优先级：英文页用译文 description/正文，中文页用 TDK 描述兜正文纯文本
+        if (!$is_zh) {
+            if (($titles[(int)$t['id']]['title'] ?? '') !== '') $title = (string)$titles[(int)$t['id']]['title'];
+            $content = Translator::content_for($lang, 'topic', (int)$t['id']);
+            $excerpt = trim((string)($content['description'] ?? ''));
+            if ($excerpt === '' && $content !== null && trim((string)$content['body']) !== '') {
+                $excerpt = plain_text_excerpt((string)$content['body'], $excerpt_length);
+            }
+        } else {
+            $tdk = TopicTDK::meta_for((int)$t['id']);
+            $excerpt = trim((string)($tdk['description'] ?? ''));
+        }
+        if ($excerpt === '') $excerpt = plain_text_excerpt((string)$t['body'], $excerpt_length);
+        // 收费版块对未登录访客打码：标题与摘要同口径
+        if ($paid) {
+            $title = mask_contacts($title);
+            $excerpt = mask_contacts($excerpt);
+        }
+        $items[] = [
+            'id' => (int)$t['id'],
+            'url' => route_url('topic', ['id' => (int)$t['id']]),
+            'title' => $title,
+            'excerpt' => $excerpt,
+            'forum_name' => (string)$forum['name'],
+            'forum_url' => (int)$forum['id'] > 0 ? route_url('forum', ['id' => (int)$forum['id']]) : '',
+            'time' => (int)$t['created_at'],
+            'view_count' => (int)$t['view_count'],
+            'reply_count' => (int)$t['reply_count'],
+        ];
+    }
+    return $items;
+}
+
 function topic_index_page(?array $filter_forum = null, ?array $filter_user = null): void
 {
     $fid = (int)($filter_forum['id'] ?? 0);
@@ -2343,6 +2420,23 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
     $page_query = $search_query . ($profile_uid ? 'tab=' . $profile_tab : 'sort=' . $sort);
     $pagination = pagination_data((bool)$data['simple_pagination'], (int)$data['total'], $p, $size, $url($page_query), (bool)$data['has_next_page']);
     $is_home_first_page = !$profile_uid && !$filter_forum && $q === '' && $p === 1;
+    // 首页第一页挂焦点轮播：热门主题卡片组（后台可关）；同时给首页补 ItemList 结构化数据
+    $carousel_rows = $is_home_first_page && setting('home_carousel_enabled', '1') === '1'
+        ? home_carousel_rows((int)setting('home_carousel_count', '5')) : [];
+    if ($carousel_rows !== []) {
+        $seo['jsonld'][] = [
+            '@context' => 'https://schema.org',
+            '@type' => 'ItemList',
+            'name' => t('焦点推荐'),
+            'numberOfItems' => count($carousel_rows),
+            'itemListElement' => array_map(static fn(int $i, array $c): array => [
+                '@type' => 'ListItem',
+                'position' => $i + 1,
+                'url' => absolute_url($c['url']),
+                'name' => $c['title'],
+            ], array_keys($carousel_rows), array_values($carousel_rows)),
+        ];
+    }
     $empty_text = $q !== '' ? '没有找到匹配的' . ($search_field === 'reply' ? '回帖' : '主题') : ((string)$data['profile_empty'] !== '' ? (string)$data['profile_empty'] : ($profile_uid ? ($profile_tab === 'replies' ? '暂无回帖' : '暂无主题') : '暂无主题'));
     render_page('home.html.twig', [
         'profile_uid' => $profile_uid,
@@ -2366,6 +2460,11 @@ function topic_index_page(?array $filter_forum = null, ?array $filter_user = nul
         'sidebar_user' => $profile_uid ? $filter_user : null,
         // 首页第一页侧栏挂话题词入口：给聚合页一批全站最重的内链
         'tag_chips' => $is_home_first_page ? TopicTags::chips() : [],
+        'carousel_rows' => $carousel_rows,
+        // 广告位取值集中在这里给出，模板只在非空时渲染对应槽位
+        'ad_home_top' => setting('ad_home_top'),
+        'ad_sidebar' => setting('ad_sidebar'),
+        'ad_in_feed' => setting('ad_in_feed'),
         'shell_class' => $profile_uid ? 'profile-mobile-sidebar' . ($own_profile ? ' profile-mobile-sidebar-own' : '') : ($is_home_first_page ? 'home-mobile-sidebar' : ''),
     ], $title, $seo);
 }
@@ -2528,6 +2627,7 @@ function topic_page_view(array $view): array
         'replies' => $replies,
         'reply_rows' => $reply_rows,
         'body_html_linked' => (string)($body_html_linked ?? ''),
+        'ad_topic_bottom' => setting('ad_topic_bottom'),
         'pagination' => pagination_data(false, (int)$t['reply_count'], $p, $size, route_url('topic', ['id' => (int)$t['id']]), false, false),
         'can_reply_forum' => $can_reply_forum,
         'can_reply' => can_speak() && $can_reply_forum,
@@ -2756,7 +2856,7 @@ function reply_edit_page(): void
 function admin_tabs(): array
 {
     $items = [];
-    foreach (['settings' => '设置', 'verify' => '站点验证', 'analytics' => '统计', 'tdk' => 'SEO TDK', 'tags' => '话题词', 'baidu' => '百度推送', 'i18n' => '多语言', 'forums' => '版块', 'groups' => '用户组', 'topics' => '帖子管理', 'users' => '用户管理', 'report' => '数据报表', 'mcp' => 'MCP日志'] as $key => $label) {
+    foreach (['settings' => '设置', 'verify' => '站点验证', 'analytics' => '统计', 'tdk' => 'SEO TDK', 'tags' => '话题词', 'baidu' => '百度推送', 'ads' => '广告位', 'i18n' => '多语言', 'forums' => '版块', 'groups' => '用户组', 'topics' => '帖子管理', 'users' => '用户管理', 'report' => '数据报表', 'mcp' => 'MCP日志'] as $key => $label) {
         $items[$key] = ['label' => $label, 'href' => admin_url(['tab' => $key])];
     }
     return $items;

@@ -200,6 +200,31 @@ final class Admin
         go(admin_url(['tab' => 'analytics']));
     }
 
+    /** 广告位 tab：各槽位的 HTML 片段，仅管理员可写，模板里原样输出；留空该位不渲染 */
+    public static function ads_fields(): array
+    {
+        return [
+            'ad_home_top' => ['label' => '首页/版块页顶部横幅', 'type' => 'textarea', 'help' => '渲染在页面标题与焦点轮播之间，全宽。适合放联盟广告（Google AdSense、百度联盟）或自营活动横幅。'],
+            'ad_in_feed' => ['label' => '列表信息流（第 4 帖后）', 'type' => 'textarea', 'help' => '渲染在主题列表第 4 行之后，随分页每页出现一次。建议使用原生样式或高度 ≤ 250px 的自适应单元。'],
+            'ad_sidebar' => ['label' => '侧栏广告', 'type' => 'textarea', 'help' => '渲染在首页/版块页侧栏用户卡片下方、产业链话题上方。适合 300×250 或竖幅样式。'],
+            'ad_topic_bottom' => ['label' => '帖子详情页底部', 'type' => 'textarea', 'help' => '渲染在主题与回帖列表之后。详情页停留时间长，适合放转化类广告。'],
+        ];
+    }
+
+    public static function ads_view(): array
+    {
+        return ['fields' => self::ads_fields(), 'settings' => settings_cache()];
+    }
+
+    public static function ads_handle_post(): never
+    {
+        $values = [];
+        foreach (array_keys(self::ads_fields()) as $key) $values[$key] = trim(post($key, 20000));
+        save_settings_values($values);
+        set_flash('广告位已保存，清空输入框即可下线对应广告');
+        go(admin_url(['tab' => 'ads']));
+    }
+
     /** 多语言 tab：启用语言与翻译队列设置；翻译由页面访问触发，详情页英文首访缺译文时即时补翻 */
     public static function i18n_fields(): array
     {
@@ -434,20 +459,21 @@ final class Admin
         if ($tab === 'tdk' && is_post_request()) self::tdk_handle_post();
         if ($tab === 'tags' && is_post_request()) self::tags_handle_post();
         if ($tab === 'baidu' && is_post_request()) self::baidu_handle_post();
+        if ($tab === 'ads' && is_post_request()) self::ads_handle_post();
         if ($tab === 'topics' && is_post_request()) self::topics_handle_post();
         if ($tab === 'users' && is_post_request()) self::users_handle_post();
         if ($tab === 'mcp' && is_post_request()) self::mcp_handle_post();
         $template = match ($tab) {
             'settings' => 'admin/settings.html.twig', 'verify' => 'admin/verify.html.twig', 'analytics' => 'admin/analytics.html.twig', 'i18n' => 'admin/i18n.html.twig', 'groups' => 'admin/groups.html.twig', 'forums' => 'admin/forums.html.twig',
             'topics' => 'admin/topics.html.twig', 'users' => 'admin/users.html.twig', 'report' => 'admin/report.html.twig',
-            'mcp' => 'admin/mcp.html.twig', 'tdk' => 'admin/tdk.html.twig', 'tags' => 'admin/tags.html.twig', 'baidu' => 'admin/baidu.html.twig',
+            'mcp' => 'admin/mcp.html.twig', 'tdk' => 'admin/tdk.html.twig', 'tags' => 'admin/tags.html.twig', 'baidu' => 'admin/baidu.html.twig', 'ads' => 'admin/ads.html.twig',
             default => '',
         };
         if ($template === '') err('你访问的页面不存在', 404);
         $view = match ($tab) {
             'settings' => self::settings_html(), 'verify' => self::verify_view(), 'analytics' => self::analytics_view(), 'i18n' => self::i18n_view(), 'groups' => self::groups_view(), 'forums' => self::forums_view(),
             'topics' => self::topics_view(), 'users' => self::users_view(), 'report' => self::report_view(),
-            'mcp' => self::mcp_view(), 'tdk' => self::tdk_view(), 'tags' => self::tags_view(), 'baidu' => self::baidu_view(),
+            'mcp' => self::mcp_view(), 'tdk' => self::tdk_view(), 'tags' => self::tags_view(), 'baidu' => self::baidu_view(), 'ads' => self::ads_view(),
             default => [],
         };
         render_page($template, $view + ['tab' => $tab], '后台');

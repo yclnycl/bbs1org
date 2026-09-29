@@ -3286,7 +3286,10 @@ function baidu_push_pick_urls(int $batch): array
     $last_raw = setting('baidu_push_last_topic_id', '');
     $last_id = $last_raw !== '' ? (int)$last_raw : (int)Topic::max('id');
     $topic_cursor = $last_id;
-    $rows = Topic::where('id', '>', $last_id)->orderBy('id')->limit($batch)->get(['id']);
+    // 百度侧没法提交 sitemap，主动推送是话题聚合页唯一的发现通道：
+    // 给 /tag/ 保留固定槽位，避免新帖多的日子把配额吃光、聚合页永远轮不到
+    $tag_reserve = min(3, $batch);
+    $rows = Topic::where('id', '>', $last_id)->orderBy('id')->limit(max(0, $batch - $tag_reserve))->get(['id']);
     foreach ($rows as $t) {
         $urls[] = absolute_url(route_url('topic', ['id' => (int)$t->id]));
     }

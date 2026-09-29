@@ -47,6 +47,21 @@ final class Search
         $tag_match = null;
         if ($query !== '' && $submitted && current_lang() === DEFAULT_LANG) {
             $tag = TopicTags::find_active($query);
+            if ($tag === null) {
+                // 模糊匹配：查询词与某个话题词互为包含时，取站内内容最多的一个（如「回收箱政策」→「旧衣回收箱」）
+                $best = null;
+                $best_total = 0;
+                foreach (TopicTags::active() as $candidate) {
+                    $kw = (string)$candidate['keyword'];
+                    if ($kw === $query || (!str_contains($query, $kw) && !str_contains($kw, $query))) continue;
+                    $total = TopicTags::topic_count($kw);
+                    if ($total > $best_total) {
+                        $best = $candidate;
+                        $best_total = $total;
+                    }
+                }
+                $tag = $best;
+            }
             if ($tag !== null) {
                 $tag_match = ['keyword' => (string)$tag['keyword'], 'summary' => (string)$tag['summary'],
                               'url' => route_url('tag', ['kw' => (string)$tag['keyword']]),

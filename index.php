@@ -2526,6 +2526,7 @@ function topic_page_view(array $view): array
         'page' => $p,
         'replies' => $replies,
         'reply_rows' => $reply_rows,
+        'body_html_linked' => (string)($body_html_linked ?? ''),
         'pagination' => pagination_data(false, (int)$t['reply_count'], $p, $size, route_url('topic', ['id' => (int)$t['id']]), false, false),
         'can_reply_forum' => $can_reply_forum,
         'can_reply' => can_speak() && $can_reply_forum,
@@ -2595,7 +2596,16 @@ function topic_page(): void
     $page_data = topic_page_replies($t, $p, $size, $off, $reply_desc);
     $t = $page_data['topic'];
     $replies = apply_reply_floors($page_data['replies'], $t, $p, $size, $reply_desc);
-    $view = compact('t', 'forum', 'replies', 'p', 'size', 'off', 'reply_desc', 'replyid', 'floor') + ['topic' => $t, 'page' => $p, 'page_size' => $size, 'offset' => $off, 'reply_order' => $reply_desc ? 1 : 0];
+    // 正文话题词内链：主楼渲染后的 HTML 里给词库词首次出现加链接（中文页 only，英文正文是译文）
+    $body_html_linked = '';
+    if (current_lang() === DEFAULT_LANG && trim((string)$t['body']) !== '') {
+        try {
+            $body_html_linked = TopicTags::link_body_html(markdown_html((string)$t['body'], (int)$t['id']), 3);
+        } catch (Throwable) {
+            $body_html_linked = '';
+        }
+    }
+    $view = compact('t', 'forum', 'replies', 'p', 'size', 'off', 'reply_desc', 'replyid', 'floor', 'body_html_linked') + ['topic' => $t, 'page' => $p, 'page_size' => $size, 'offset' => $off, 'reply_order' => $reply_desc ? 1 : 0];
     $t_seo = page_seo('topic', ['id' => (int)$t['id']], (string)$t['body'], (string)$t['title']);
     // 英文页的 SEO 描述直接用译文摘要；中文 TDK 队列结果只在中文页应用
     if ($t_i18n !== null && trim($t_i18n['description']) !== '') {
@@ -2814,12 +2824,13 @@ function sitemap_w3c(int $ts): string
     return date('Y-m-d\TH:i:sP', $ts);
 }
 
-/** 话题页的 sitemap 条目：中文始终在，其他语言只在译文已生成时才输出（否则该语言是 302，不能进 sitemap） */
+/** 话题页的 sitemap 条目：中文始终在，其他语言只在译文已生成时才输出（否则该语言是 302，不能进 sitemap）；lastmod 取命中最新的主题时间 */
 function sitemap_tag_urls(array $tag): array
 {
     $kw = (string)$tag['keyword'];
+    $lastmod = TopicTags::topic_lastmod($kw);
     $langs = enabled_langs();
-    if (!$langs) return [sitemap_url_xml(absolute_url(route_url('tag', ['kw' => $kw], DEFAULT_LANG)))];
+    if (!$langs) return [sitemap_url_xml(absolute_url(route_url('tag', ['kw' => $kw], DEFAULT_LANG)), $lastmod)];
     $map = ['zh-CN' => absolute_url(route_url('tag', ['kw' => $kw], DEFAULT_LANG))];
     foreach ($langs as $lang) {
         if (Translator::content_for($lang, 'tag', (int)$tag['id']) !== null) {
@@ -2829,7 +2840,7 @@ function sitemap_tag_urls(array $tag): array
     $urls = [];
     foreach ($map as $hreflang => $url) {
         if ($hreflang === 'x-default') continue;
-        $urls[] = sitemap_url_xml($url, 0, $map);
+        $urls[] = sitemap_url_xml($url, $lastmod, $map);
     }
     return $urls;
 }
@@ -2984,6 +2995,7 @@ function robots_txt_route(): void
     $lines[] = 'Disallow: /app/';
     $lines[] = '';
     $lines[] = 'Sitemap: ' . absolute_url(app_url('sitemap.xml'));
+    $lines[] = 'Sitemap: ' . absolute_url(app_url('sitemap-tags.xml'));
     header('Content-Type: text/plain; charset=UTF-8');
     header('Cache-Control: public, max-age=3600');
     echo implode("\n", $lines) . "\n";
@@ -3049,9 +3061,18 @@ function llms_txt_route(): void
     }
     $lines[] = '';
     $lines[] = t('## 产业链话题');
-    // 话题聚合页是按关键词聚合的主题集，AI 系统可按话题直接取整组相关内容
+    // 按环节分组列出话题词（带站内主题数）：AI 系统可直接按话题取整组相关内容
+    $grouped = [];
     foreach (TopicTags::active() as $tag_row) {
-        $lines[] = '- [' . $tag_row['keyword'] . '](' . absolute_url(route_url('tag', ['kw' => (string)$tag_row['keyword']], DEFAULT_LANG)) . ')' . t('：') . cut(seo_text((string)$tag_row['summary']), 80);
+        $grouped[(string)$tag_row['chain']][] = $tag_row;
+    }
+    foreach ($grouped as $chain => $chain_tags) {
+        $lines[] = t('### ') . $chain;
+        foreach ($chain_tags as $tag_row) {
+            $count = TopicTags::topic_count((string)$tag_row['keyword']);
+            $lines[] = '- [' . $tag_row['keyword'] . '](' . absolute_url(route_url('tag', ['kw' => (string)$tag_row['keyword']], DEFAULT_LANG)) . ')'
+                . t('：') . cut(seo_text((string)$tag_row['summary']), 80) . t('（') . $count . t(' 篇相关主题）');
+        }
     }
     $lines[] = '';
     $lines[] = t('## 使用说明');
@@ -3065,6 +3086,73 @@ function llms_txt_route(): void
     echo implode("\n", $lines) . "\n";
     exit;
 }
+/** 百度主动推送（data.zz.baidu.com/urls）：新站日配额很小（实测 10 条/天），每小时最多一轮、每轮最多 5 条：
+ *  先推游标之后的新主题，配额有余再轮转话题页；命中 over quota 就退避到明天。token 在后台「话题词」tab 配置 */
+function baidu_push_tick(): void
+{
+    if (PHP_SAPI === 'cli') return;
+    if (now() < (int)setting('baidu_push_next_run', '0')) return;
+    save_settings_values(['baidu_push_next_run' => (string)(now() + 3600)]);
+    $token = trim((string)setting('baidu_push_token', ''));
+    if ($token === '') return;
+    $urls = [];
+    // 游标缺省（首次启用）从当前最新主题起推，不回头推历史存量
+    $last_raw = setting('baidu_push_last_topic_id', '');
+    $last_id = $last_raw !== '' ? (int)$last_raw : (int)Topic::max('id');
+    if ($last_raw === '') {
+        save_settings_values(['baidu_push_last_topic_id' => (string)$last_id]);
+    }
+    $rows = Topic::where('id', '>', $last_id)->orderBy('id')->limit(5)->get(['id']);
+    foreach ($rows as $t) {
+        $urls[] = absolute_url(route_url('topic', ['id' => (int)$t->id]));
+    }
+    if ($rows->isNotEmpty()) {
+        save_settings_values(['baidu_push_last_topic_id' => (string)$rows->last()->id]);
+    }
+    $quota = 5 - count($urls);
+    $tags = $quota > 0 ? TopicTags::active() : [];
+    if ($tags) {
+        $cursor = (int)setting('baidu_push_tag_cursor', '0');
+        for ($i = 0; $i < $quota; $i++) {
+            $tag_row = $tags[($cursor + $i) % count($tags)];
+            $urls[] = absolute_url(route_url('tag', ['kw' => (string)$tag_row['keyword']], DEFAULT_LANG));
+        }
+        save_settings_values(['baidu_push_tag_cursor' => (string)(($cursor + $quota) % count($tags))]);
+    }
+    if (!$urls) return;
+    [$ok, $message] = baidu_push_urls_now($urls);
+    save_settings_values(['baidu_push_last_result' => $message, 'baidu_push_last_run' => (string)now()]);
+    if (!$ok && $message === 'over quota') {
+        // 日配额用完：明天再推（配额按天重置）
+        save_settings_values(['baidu_push_next_run' => (string)(now() + 86400)]);
+    }
+}
+
+/** 单次百度推送（data.zz.baidu.com/urls，text/plain 批量）：返回 [是否成功, 结果描述]，尽力而为不抛异常 */
+function baidu_push_urls_now(array $urls): array
+{
+    $token = trim((string)setting('baidu_push_token', ''));
+    if ($token === '' || !$urls) return [false, '未配置 token 或无 URL'];
+    $site = trim((string)setting('baidu_push_site', '')) ?: rtrim(base_url(), '/');
+    $context = stream_context_create(['http' => [
+        'method' => 'POST',
+        'header' => "Content-Type: text/plain\r\n",
+        'content' => implode("\n", $urls),
+        'timeout' => 10,
+        'ignore_errors' => true,
+    ]]);
+    try {
+        $resp = @file_get_contents('http://data.zz.baidu.com/urls?site=' . rawurlencode($site) . '&token=' . rawurlencode($token), false, $context);
+        $data = $resp !== false ? json_decode((string)$resp, true) : null;
+        if (is_array($data) && isset($data['success'])) {
+            return [true, 'success ' . (int)$data['success'] . ', remain ' . (int)($data['remain'] ?? 0)];
+        }
+        return [false, (string)($data['message'] ?? ($resp !== false ? mb_substr((string)$resp, 0, 120) : '请求失败'))];
+    } catch (Throwable $e) {
+        return [false, mb_substr($e->getMessage(), 0, 120)];
+    }
+}
+
 /** /feed.xml：RSS 2.0 订阅源，取游客可见版块最新 feed_size 篇主题（订阅器与聚合端发现更新的常规通道；全量发现走 sitemap） */
 function feed_route(): void
 {
@@ -3194,6 +3282,7 @@ try {
 tdk_cron_tick();
 i18n_cron_tick();
 i18n_view_tick();
+baidu_push_tick();
 /** 流量触发的翻译队列批处理：与 TDK 队列同一套限频 + fastcgi_finish_request 模式 */
 function i18n_cron_tick(): void
 {

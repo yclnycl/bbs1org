@@ -2,6 +2,25 @@
 {% import 'macros/form.html.twig' as f %}
 {% block admin_body %}
     <div class="form-panel settings-form">
+        <h2>百度主动推送</h2>
+        <p>data.zz.baidu.com/urls 通道，新站日配额很小（实测 10 条/天）。开启后每小时自动推一小批：优先新主题，配额有余轮转话题页；超额自动退避到明天。站点 sitemap 提交异常时用它保底。</p>
+        <form method="post">
+            {{ f.token() }}
+            <input type="hidden" name="action" value="baidu_save">
+            {{ f.input('推送 token', 'baidu_push_token', '', 'text', false, gsc.baidu.token_set ? '已配置（留空保持不变）' : '贴入 data.zz.baidu.com 的 token，留空关闭') }}
+            {{ f.input('site 参数', 'baidu_push_site', gsc.baidu.site, 'text', false, '如 https://www.cncttc.com，留空用站点主域') }}
+            <div class="row settings-actions"><button type="submit">保存</button></div>
+        </form>
+        <form method="post">
+            {{ f.token() }}
+            <input type="hidden" name="action" value="baidu_test">
+            <div class="row settings-actions">
+                <button type="submit">立即试推首页</button>
+                {% if gsc.baidu.last_run %}<span>上次：{{ gsc.baidu.last_run|date('m-d H:i') }} · {{ gsc.baidu.last_result }}</span>{% endif %}
+            </div>
+        </form>
+    </div>
+    <div class="form-panel settings-form">
         <h2>收录监控（Search Console 近 28 天）</h2>
         {% if not gsc.configured %}
             <p>未配置凭证：把服务账号 JSON 放到数据卷 <code>app/data/gsc-service-account.json</code>。</p>

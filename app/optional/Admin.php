@@ -294,7 +294,11 @@ final class Admin
         TopicTags::ensure_ready();
         Gsc::ensure_schema();
         $gsc = ['configured' => Gsc::configured(), 'fetched_at' => (int)setting('gsc_queries_fetched_at', '0'), 'queries' => [],
-                'perf' => Gsc::cached_performance(), 'perf_fetched_at' => (int)setting('gsc_perf_fetched_at', '0')];
+                'perf' => Gsc::cached_performance(), 'perf_fetched_at' => (int)setting('gsc_perf_fetched_at', '0'),
+                'baidu' => ['token_set' => trim((string)setting('baidu_push_token', '')) !== '',
+                            'site' => (string)setting('baidu_push_site', ''),
+                            'last_result' => (string)setting('baidu_push_last_result', ''),
+                            'last_run' => (int)setting('baidu_push_last_run', '0')]];
         // 看板表格里展示解码后的关键词而不是百分号编码 URL
         foreach (($gsc['perf']['tag_pages'] ?? []) as $i => $page) {
             $path = (string)parse_url((string)$page['url'], PHP_URL_PATH);
@@ -342,6 +346,16 @@ final class Admin
             } catch (Throwable $e) {
                 set_flash('Search Console 拉取失败：' . mb_substr($e->getMessage(), 0, 180));
             }
+        } elseif ($action === 'baidu_save') {
+            // token 是运行时密据存站点设置（不进代码库）；表单留空表示保持不变
+            $values = ['baidu_push_site' => trim((string)($_POST['baidu_push_site'] ?? ''))];
+            if (trim((string)($_POST['baidu_push_token'] ?? '')) !== '') {
+                $values['baidu_push_token'] = trim((string)$_POST['baidu_push_token']);
+            }
+            save_settings_values($values);
+            set_flash('百度推送设置已保存');
+        } elseif ($action === 'baidu_test') {
+            \baidu_push_urls_now([rtrim(\base_url(), '/') . '/']);
         } elseif ($action === 'import') {
             $query = trim((string)($_POST['query'] ?? ''));
             $chain = (string)($_POST['chain'] ?? '');

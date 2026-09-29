@@ -147,9 +147,14 @@ final class Gsc
         $configured = trim((string)setting('gsc_site_url', ''));
         if ($configured !== '') return $configured;
         $host = (string)parse_url(base_url(), PHP_URL_HOST);
+        // 域名型资源是 sc-domain:cncttc.com（无 www 前缀），匹配时把 www 剥掉
+        $bare = preg_replace('/^www\./', '', $host) ?: $host;
         foreach (self::sites() as $site) {
             $url = $site['url'];
-            if (str_contains($url, "sc-domain:{$host}") || str_contains($url, "//{$host}")) return $url;
+            if (str_contains($url, "sc-domain:{$bare}") || str_contains($url, "sc-domain:{$host}")
+                || str_contains($url, "//{$host}")) {
+                return $url;
+            }
         }
         return null;
     }
@@ -184,6 +189,7 @@ final class Gsc
     /** 拉取结果落库（整表镜像最近一次拉取），供后台候选词面板使用 */
     public static function refresh_queries(int $days, int $limit = 200): int
     {
+        self::ensure_schema();
         $rows = self::queries($days, $limit);
         $db = db();
         $db->beginTransaction();

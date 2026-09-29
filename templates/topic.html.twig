@@ -14,7 +14,7 @@
             {% if i18n_pending %}<div class="i18n-pending">{{ '该内容暂无英文译文，以下为中文原文，译文生成后会自动替换。'|t }}</div>{% endif %}
             <ul class="post-list topic-post-list">
                 {% if page == 1 %}
-                    {{ ui.post_row(t, t.body, t.created_at, {quote: current_uid, edit: can_manage_topic(t), edit_url: route_url('topic_edit', {id: t.id})}) }}
+                    {{ ui.post_row(t, t.body, t.created_at, {quote: current_uid, edit: can_manage_topic(t), edit_url: route_url('topic_edit', {id: t.id})}, '', 0, 0, false, {body_html: body_html_linked}) }}
                 {% endif %}
                 {% for r in reply_rows %}
                     {{ ui.post_row(r, r.body, r.created_at, {quote: current_uid, edit: can_manage_reply(r), edit_url: route_url('reply_edit', {id: r.id})}, '', 0, 0, r.highlight, {reply_position: r.floor}) }}

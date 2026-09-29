@@ -271,9 +271,58 @@ final class TopicTags
         return (int)Topic::where('title', 'LIKE', search_like_pattern($keyword))->count();
     }
 
+    /** 话题页的 lastmod（sitemap 用）：命中最新的主题时间；没有命中返回 0（条目里省略 lastmod） */
+    public static function topic_lastmod(string $keyword): int
+    {
+        self::ensure_ready();
+        if (SearchIndex::available()) {
+            $plan = SearchIndex::match_plan($keyword);
+            if ($plan !== null) {
+                $st = db()->prepare('SELECT MAX(t.created_at) FROM plugin_fts_topics f JOIN app_topics t ON t.id = f.rowid WHERE plugin_fts_topics MATCH ?');
+                $st->execute([$plan['expr']]);
+                return (int)$st->fetchColumn();
+            }
+        }
+        return (int)Topic::where('title', 'LIKE', search_like_pattern($keyword))->max('created_at');
+    }
+
     /** 候选词预检：该词的站内命中数（后台导入面板用，命中过少不建议建页） */
     public static function site_hits(string $keyword): int
     {
         return min(self::topic_count($keyword), 9999);
+    }
+
+    /**
+     * 正文渲染后的 HTML 里给话题词的首次出现加内链（全篇最多 limit 个）。
+     * 只处理标签外的纯文本段并跳过已有 <a> 内的文字——不碰链接、不嵌套、不过度链接。
+     */
+    public static function link_body_html(string $html, int $limit = 3): string
+    {
+        $keywords = array_column(self::active(), 'keyword');
+        if (!$keywords) return $html;
+        $parts = preg_split('/(<[^>]+>)/u', $html, -1, PREG_SPLIT_DELIM_CAPTURE) ?: [$html];
+        $linked = 0;
+        $in_anchor = false;
+        foreach ($parts as $i => $part) {
+            if ($linked >= $limit) break;
+            if ($part === '' || $part[0] === '<') {
+                $lower = strtolower($part);
+                if (str_starts_with($lower, '<a ')) $in_anchor = true;
+                if (str_starts_with($lower, '</a>')) $in_anchor = false;
+                continue;
+            }
+            if ($in_anchor) continue;
+            foreach ($keywords as $kw) {
+                $pos = mb_strpos($part, (string)$kw);
+                if ($pos === false) continue;
+                $url = route_url('tag', ['kw' => (string)$kw]);
+                $parts[$i] = mb_substr($part, 0, $pos)
+                    . '<a class="tag-body-link" href="' . h($url) . '">' . h((string)$kw) . '</a>'
+                    . mb_substr($part, $pos + mb_strlen((string)$kw));
+                $linked++;
+                break; // 一段只链一个词
+            }
+        }
+        return $linked > 0 ? implode('', $parts) : $html;
     }
 }

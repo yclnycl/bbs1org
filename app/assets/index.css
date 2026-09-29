@@ -4627,3 +4627,11 @@ table.list{
     font-weight: 600;
     color: var(--brand-strong)
 }
+
+/* 正文里的话题词自动内链 */
+.tag-body-link{
+    color: var(--brand-strong);
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 3px
+}

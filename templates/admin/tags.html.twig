@@ -2,40 +2,6 @@
 {% import 'macros/form.html.twig' as f %}
 {% block admin_body %}
     <div class="form-panel settings-form">
-        <h2>百度主动推送</h2>
-        <p>data.zz.baidu.com/urls 通道，新站日配额 {{ gsc.baidu.quota }} 条/天（北京时间重置）。自动推送每小时探测：新主题优先，话题页轮转兜底，一把推满当日剩余配额；超额自动减半重试。今天已推 <strong>{{ gsc.baidu.pushed_today }}/{{ gsc.baidu.quota }}</strong>。</p>
-        <form method="post">
-            {{ f.token() }}
-            <input type="hidden" name="action" value="baidu_save">
-            {{ f.input('推送 token', 'baidu_push_token', '', 'text', false, gsc.baidu.token_set ? '已配置（留空保持不变）' : '贴入 data.zz.baidu.com 的 token，留空关闭') }}
-            {{ f.input('site 参数', 'baidu_push_site', gsc.baidu.site, 'text', false, '如 https://www.cncttc.com，留空用站点主域') }}
-            <div class="row settings-actions"><button type="submit">保存</button></div>
-        </form>
-        <form method="post">
-            {{ f.token() }}
-            <input type="hidden" name="action" value="baidu_test">
-            <div class="row settings-actions">
-                <button type="submit">立即试推首页</button>
-                {% if gsc.baidu.last_run %}<span>上次自动推送：{{ gsc.baidu.last_run|date('m-d H:i') }} · {{ gsc.baidu.last_result }}</span>{% endif %}
-            </div>
-        </form>
-        {% if gsc.baidu.logs %}
-            <table class="list admin-bulk-list">
-                <tr><th>时间</th><th>提交</th><th>接收</th><th>结果</th></tr>
-                {% for row in gsc.baidu.logs %}
-                    <tr>
-                        <td>{{ row.created_at|date('m-d H:i') }}</td>
-                        <td>{{ row.submitted }}</td>
-                        <td>{{ row.success }}{% if not row.ok %}<small>（失败）</small>{% endif %}</td>
-                        <td>{{ row.message }}</td>
-                    </tr>
-                {% endfor %}
-            </table>
-        {% else %}
-            <p class="empty-state">还没有推送记录。</p>
-        {% endif %}
-    </div>
-    <div class="form-panel settings-form">
         <h2>收录监控（Search Console 近 28 天）</h2>
         {% if not gsc.configured %}
             <p>未配置凭证：把服务账号 JSON 放到数据卷 <code>app/data/gsc-service-account.json</code>。</p>

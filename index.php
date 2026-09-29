@@ -2756,7 +2756,7 @@ function reply_edit_page(): void
 function admin_tabs(): array
 {
     $items = [];
-    foreach (['settings' => '设置', 'verify' => '站点验证', 'analytics' => '统计', 'tdk' => 'SEO TDK', 'tags' => '话题词', 'i18n' => '多语言', 'forums' => '版块', 'groups' => '用户组', 'topics' => '帖子管理', 'users' => '用户管理', 'report' => '数据报表', 'mcp' => 'MCP日志'] as $key => $label) {
+    foreach (['settings' => '设置', 'verify' => '站点验证', 'analytics' => '统计', 'tdk' => 'SEO TDK', 'tags' => '话题词', 'baidu' => '百度推送', 'i18n' => '多语言', 'forums' => '版块', 'groups' => '用户组', 'topics' => '帖子管理', 'users' => '用户管理', 'report' => '数据报表', 'mcp' => 'MCP日志'] as $key => $label) {
         $items[$key] = ['label' => $label, 'href' => admin_url(['tab' => $key])];
     }
     return $items;

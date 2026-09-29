@@ -288,20 +288,46 @@ final class Admin
         return ['groups' => groups_cache()];
     }
 
+    /** 百度推送 tab：token/site 配置、今日配额进度、累计统计与推送日志 */
+    public static function baidu_view(): array
+    {
+        return ['baidu' => [
+            'token' => (string)setting('baidu_push_token', ''),
+            'site' => (string)setting('baidu_push_site', ''),
+            'last_result' => (string)setting('baidu_push_last_result', ''),
+            'last_run' => (int)setting('baidu_push_last_run', '0'),
+            'pushed_today' => BaiduPush::pushed_today(),
+            'quota' => BaiduPush::DAILY_QUOTA,
+            'totals' => BaiduPush::totals(),
+            'logs' => BaiduPush::recent(50),
+        ]];
+    }
+
+    public static function baidu_handle_post(): never
+    {
+        $action = (string)($_POST['action'] ?? '');
+        if ($action === 'baidu_save') {
+            // token 是运行时密据存站点设置（不进代码库）；表单留空表示保持不变
+            $values = ['baidu_push_site' => trim((string)($_POST['baidu_push_site'] ?? ''))];
+            if (trim((string)($_POST['baidu_push_token'] ?? '')) !== '') {
+                $values['baidu_push_token'] = trim((string)$_POST['baidu_push_token']);
+            }
+            save_settings_values($values);
+            set_flash('百度推送设置已保存');
+        } elseif ($action === 'baidu_test') {
+            \baidu_push_urls_now([rtrim(\base_url(), '/') . '/']);
+            set_flash('已试推首页：' . (string)setting('baidu_push_last_result', ''));
+        }
+        go(admin_url(['tab' => 'baidu']));
+    }
+
     /** 话题词 tab：词库列表（含 TDK 状态）+ Search Console 查询词候选（带站内命中预检） */
     public static function tags_view(): array
     {
         TopicTags::ensure_ready();
         Gsc::ensure_schema();
         $gsc = ['configured' => Gsc::configured(), 'fetched_at' => (int)setting('gsc_queries_fetched_at', '0'), 'queries' => [],
-                'perf' => Gsc::cached_performance(), 'perf_fetched_at' => (int)setting('gsc_perf_fetched_at', '0'),
-                'baidu' => ['token_set' => trim((string)setting('baidu_push_token', '')) !== '',
-                            'site' => (string)setting('baidu_push_site', ''),
-                            'last_result' => (string)setting('baidu_push_last_result', ''),
-                            'last_run' => (int)setting('baidu_push_last_run', '0'),
-                            'pushed_today' => \app\optional\BaiduPush::pushed_today(),
-                            'quota' => \app\optional\BaiduPush::DAILY_QUOTA,
-                            'logs' => \app\optional\BaiduPush::recent(12)]];
+                'perf' => Gsc::cached_performance(), 'perf_fetched_at' => (int)setting('gsc_perf_fetched_at', '0')];
         // 看板表格里展示解码后的关键词而不是百分号编码 URL
         foreach (($gsc['perf']['tag_pages'] ?? []) as $i => $page) {
             $path = (string)parse_url((string)$page['url'], PHP_URL_PATH);
@@ -349,16 +375,6 @@ final class Admin
             } catch (Throwable $e) {
                 set_flash('Search Console 拉取失败：' . mb_substr($e->getMessage(), 0, 180));
             }
-        } elseif ($action === 'baidu_save') {
-            // token 是运行时密据存站点设置（不进代码库）；表单留空表示保持不变
-            $values = ['baidu_push_site' => trim((string)($_POST['baidu_push_site'] ?? ''))];
-            if (trim((string)($_POST['baidu_push_token'] ?? '')) !== '') {
-                $values['baidu_push_token'] = trim((string)$_POST['baidu_push_token']);
-            }
-            save_settings_values($values);
-            set_flash('百度推送设置已保存');
-        } elseif ($action === 'baidu_test') {
-            \baidu_push_urls_now([rtrim(\base_url(), '/') . '/']);
         } elseif ($action === 'import') {
             $query = trim((string)($_POST['query'] ?? ''));
             $chain = (string)($_POST['chain'] ?? '');
@@ -417,20 +433,21 @@ final class Admin
         if ($tab === 'i18n' && is_post_request()) self::i18n_handle_post();
         if ($tab === 'tdk' && is_post_request()) self::tdk_handle_post();
         if ($tab === 'tags' && is_post_request()) self::tags_handle_post();
+        if ($tab === 'baidu' && is_post_request()) self::baidu_handle_post();
         if ($tab === 'topics' && is_post_request()) self::topics_handle_post();
         if ($tab === 'users' && is_post_request()) self::users_handle_post();
         if ($tab === 'mcp' && is_post_request()) self::mcp_handle_post();
         $template = match ($tab) {
             'settings' => 'admin/settings.html.twig', 'verify' => 'admin/verify.html.twig', 'analytics' => 'admin/analytics.html.twig', 'i18n' => 'admin/i18n.html.twig', 'groups' => 'admin/groups.html.twig', 'forums' => 'admin/forums.html.twig',
             'topics' => 'admin/topics.html.twig', 'users' => 'admin/users.html.twig', 'report' => 'admin/report.html.twig',
-            'mcp' => 'admin/mcp.html.twig', 'tdk' => 'admin/tdk.html.twig', 'tags' => 'admin/tags.html.twig',
+            'mcp' => 'admin/mcp.html.twig', 'tdk' => 'admin/tdk.html.twig', 'tags' => 'admin/tags.html.twig', 'baidu' => 'admin/baidu.html.twig',
             default => '',
         };
         if ($template === '') err('你访问的页面不存在', 404);
         $view = match ($tab) {
             'settings' => self::settings_html(), 'verify' => self::verify_view(), 'analytics' => self::analytics_view(), 'i18n' => self::i18n_view(), 'groups' => self::groups_view(), 'forums' => self::forums_view(),
             'topics' => self::topics_view(), 'users' => self::users_view(), 'report' => self::report_view(),
-            'mcp' => self::mcp_view(), 'tdk' => self::tdk_view(), 'tags' => self::tags_view(),
+            'mcp' => self::mcp_view(), 'tdk' => self::tdk_view(), 'tags' => self::tags_view(), 'baidu' => self::baidu_view(),
             default => [],
         };
         render_page($template, $view + ['tab' => $tab], '后台');

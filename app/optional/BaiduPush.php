@@ -67,4 +67,14 @@ final class BaiduPush
         return db()->query('SELECT submitted, success, ok, message, created_at FROM plugin_baidu_push_log
             ORDER BY id DESC LIMIT ' . max(1, $limit))->fetchAll(PDO::FETCH_ASSOC);
     }
+
+    /** 后台统计：累计推送次数/成功条数/失败次数 */
+    public static function totals(): array
+    {
+        self::ensure_schema();
+        $row = db()->query('SELECT COUNT(*) attempts, COALESCE(SUM(success), 0) success,
+                COALESCE(SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END), 0) failed
+            FROM plugin_baidu_push_log')->fetch(PDO::FETCH_ASSOC);
+        return ['attempts' => (int)$row['attempts'], 'success' => (int)$row['success'], 'failed' => (int)$row['failed']];
+    }
 }

@@ -1,0 +1,45 @@
+{% extends 'admin/layout.html.twig' %}
+{% import 'macros/form.html.twig' as f %}
+{% block admin_body %}
+    <div class="form-panel settings-form">
+        <h2>推送配置</h2>
+        <p>通道为百度主动推送（data.zz.baidu.com/urls），新站日配额 {{ baidu.quota }} 条/天、北京时间重置。自动推送每小时探测一轮：新主题优先，话题页轮转兜底，一把推满当日剩余配额；超额自动减半重试。站点 sitemap 提交异常时用它保底。</p>
+        <form method="post">
+            {{ f.token() }}
+            <input type="hidden" name="action" value="baidu_save">
+            {{ f.input('推送 token', 'baidu_push_token', baidu.token, 'text', false, 'data.zz.baidu.com 的 token；清空此框并保存即关闭推送') }}
+            {{ f.input('site 参数', 'baidu_push_site', baidu.site, 'text', false, '如 https://www.cncttc.com，留空用站点主域') }}
+            <div class="row settings-actions"><button type="submit">保存配置</button></div>
+        </form>
+        <form method="post">
+            {{ f.token() }}
+            <input type="hidden" name="action" value="baidu_test">
+            <div class="row settings-actions">
+                <button type="submit">立即试推首页</button>
+                {% if baidu.last_run %}<span>上次自动推送：{{ baidu.last_run|date('m-d H:i') }} · {{ baidu.last_result }}</span>{% endif %}
+            </div>
+        </form>
+    </div>
+    <div class="form-panel settings-form">
+        <h2>今日配额与累计统计</h2>
+        <p>今天已推 <strong>{{ baidu.pushed_today }}/{{ baidu.quota }}</strong> 条{% if baidu.pushed_today >= baidu.quota %}（配额已用满）{% endif %}；累计尝试 <strong>{{ baidu.totals.attempts }}</strong> 次，成功推送 <strong>{{ baidu.totals.success }}</strong> 条，失败 <strong>{{ baidu.totals.failed }}</strong> 次。</p>
+    </div>
+    <div class="form-panel settings-form">
+        <h2>推送日志（最近 {{ baidu.logs|length }} 条）</h2>
+        {% if baidu.logs %}
+            <table class="list admin-bulk-list">
+                <tr><th>时间</th><th>提交</th><th>接收</th><th>结果</th></tr>
+                {% for row in baidu.logs %}
+                    <tr>
+                        <td>{{ row.created_at|date('m-d H:i') }}</td>
+                        <td>{{ row.submitted }}</td>
+                        <td>{{ row.success }}{% if not row.ok %}<small>（失败）</small>{% endif %}</td>
+                        <td>{{ row.message }}</td>
+                    </tr>
+                {% endfor %}
+            </table>
+        {% else %}
+            <p class="empty-state">还没有推送记录——配置 token 后等自动推送，或点上方「立即试推首页」。</p>
+        {% endif %}
+    </div>
+{% endblock %}

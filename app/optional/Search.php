@@ -26,6 +26,9 @@ final class Search
             : '';
         $page = $submitted ? min(max_pagination_pages(), max(1, (int)($_POST['p'] ?? $_GET['p'] ?? 1))) : 1;
         if ($query !== '') require_search_min_chars($query);
+        // 站内搜索词回流词库（中文页 only）：真实查询词是话题词候选的一手来源。
+        // 只记第 1 页——翻页是同一需求的重复计数，爬虫批量翻页也不会灌大词表
+        if ($query !== '' && $submitted && $page === 1 && current_lang() === DEFAULT_LANG) SearchLog::record($query);
         $results = [];
         $has_prev = false;
         $has_next = false;

@@ -366,7 +366,15 @@ final class Admin
                 $gsc['queries'][] = $q;
             }
         }
-        return ['tags' => TopicTags::admin_list(), 'chains' => TopicTags::chains(), 'gsc' => $gsc];
+        // 站内搜索热词榜：与 GSC 查询词互补的第二条候选词来源，一键导入词库
+        $existing_kw = array_column(TopicTags::admin_list(), 'id', 'keyword');
+        $search_terms = [];
+        foreach (SearchLog::top(20) as $t) {
+            $t['is_tag'] = isset($existing_kw[$t['term']]);
+            $search_terms[] = $t;
+        }
+        return ['tags' => TopicTags::admin_list(), 'chains' => TopicTags::chains(), 'gsc' => $gsc,
+                'search_terms' => $search_terms, 'search_terms_total' => SearchLog::total_terms()];
     }
 
     public static function tags_handle_post(): never
@@ -400,6 +408,9 @@ final class Admin
             } catch (Throwable $e) {
                 set_flash('Search Console 拉取失败：' . mb_substr($e->getMessage(), 0, 180));
             }
+        } elseif ($action === 'searchlog_clear') {
+            SearchLog::clear();
+            set_flash('站内搜索词记录已清空');
         } elseif ($action === 'import') {
             $query = trim((string)($_POST['query'] ?? ''));
             $chain = (string)($_POST['chain'] ?? '');

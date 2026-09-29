@@ -39,6 +39,44 @@
         {% endif %}
     </div>
     <div class="form-panel settings-form">
+        <h2>站内搜索热词 → 候选话题词</h2>
+        <p>已到站用户在站内搜索框真实输入的词（按搜索次数降序，中文页记录）。与上方 GSC 查询词互补：GSC 反映搜索引擎上的需求，这里反映已到站用户的需求。导入后 TDK 与英文译文由队列自动生成。当前共 <strong>{{ search_terms_total }}</strong> 个不同的词。</p>
+        {% if search_terms %}
+            <table class="list admin-bulk-list">
+                <tr><th>搜索词</th><th>次数</th><th>最近搜索</th><th>操作</th></tr>
+                {% for t in search_terms %}
+                    <tr>
+                        <td>{{ t.term }}</td>
+                        <td>{{ t.hits }}</td>
+                        <td>{{ t.last_at|date('m-d H:i') }}</td>
+                        <td>
+                            {% if t.is_tag %}
+                                已是话题词
+                            {% else %}
+                                <form method="post">
+                                    {{ f.token() }}
+                                    <input type="hidden" name="action" value="import">
+                                    <input type="hidden" name="query" value="{{ t.term }}">
+                                    <select name="chain" aria-label="产业链环节">
+                                        {% for c in chains %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+                                    </select>
+                                    <button type="submit">导入</button>
+                                </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </table>
+            <form method="post">
+                {{ f.token() }}
+                <input type="hidden" name="action" value="searchlog_clear">
+                <div class="row settings-actions"><button type="submit">清空记录</button></div>
+            </form>
+        {% else %}
+            <p class="empty-state">还没有搜索记录——访客在站内搜索后会自动聚合到这里。</p>
+        {% endif %}
+    </div>
+    <div class="form-panel settings-form">
         <h2>Search Console 查询词 → 候选话题词</h2>
         {% if not gsc.configured %}
             <p>未配置凭证：把服务账号 JSON 放到数据卷 <code>app/data/gsc-service-account.json</code>（密钥不上传代码库），并在 GSC 后台把该服务账号加为本资源的用户。</p>

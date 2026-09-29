@@ -3097,6 +3097,10 @@ function baidu_push_tick(): void
     if (now() < (int)setting('baidu_push_next_run', '0')) return;
     save_settings_values(['baidu_push_next_run' => (string)(now() + 3600)]);
     if (trim((string)setting('baidu_push_token', '')) === '') return;
+    // 自愈兜底：个别 FPM 请求里新类的自动加载偶发失灵（CLI 与其他入口正常），显式加载保证类必定可用
+    if (!class_exists(BaiduPush::class)) {
+        require_once APP_ROOT . '/app/optional/BaiduPush.php';
+    }
     BaiduPush::ensure_schema();
     $pushed = BaiduPush::pushed_today();
     if ($pushed >= BaiduPush::DAILY_QUOTA) {
